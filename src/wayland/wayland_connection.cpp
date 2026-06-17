@@ -1055,7 +1055,7 @@ void WaylandConnection::bindVirtualKeyboardService() {
   if (m_virtualKeyboardManager == nullptr || m_seat == nullptr) {
     return;
   }
-  m_virtualKeyboardService->bind(m_virtualKeyboardManager, m_seat);
+  m_virtualKeyboardService->bind(m_display, m_virtualKeyboardManager, m_seat);
 }
 
 void WaylandConnection::cleanup() {
