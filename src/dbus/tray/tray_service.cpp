@@ -569,6 +569,14 @@ void TrayService::start() {
 }
 
 void TrayService::startLegacyOwner() {
+  m_dbusProxy = sdbus::createProxy(m_bus.connection(), kDbusName, kDbusPath);
+
+  const bool useClientMode = externalWatcherHasOwner();
+  if (useClientMode) {
+    startAsWatcherClient();
+    return;
+  }
+
   m_watcherRole = WatcherRole::Owner;
 
   m_watcherObject = sdbus::createObject(m_bus.connection(), kWatcherObjectPath);
@@ -615,7 +623,6 @@ void TrayService::startLegacyOwner() {
     throw;
   }
 
-  m_dbusProxy = sdbus::createProxy(m_bus.connection(), kDbusName, kDbusPath);
   m_dbusProxy->uponSignal("NameOwnerChanged")
       .onInterface(kDbusInterface)
       .call([this](const std::string& name, const std::string& old_owner, const std::string& new_owner) {
