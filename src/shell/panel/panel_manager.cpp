@@ -242,6 +242,10 @@ void PanelManager::setToggleSettingsWindowCallback(std::function<void()> callbac
   m_toggleSettingsWindow = std::move(callback);
 }
 
+void PanelManager::setCloseDesktopWidgetsEditorCallback(std::function<void()> callback) {
+  m_closeDesktopWidgetsEditor = std::move(callback);
+}
+
 void PanelManager::openSettingsWindow() {
   if (isOpen() && !m_closing) {
     closePanel();
@@ -300,6 +304,17 @@ void PanelManager::setAttachedPanelBarSettledCallback(std::function<bool(wl_outp
   m_attachedPanelBarSettledCallback = std::move(callback);
 }
 
+void PanelManager::onAttachedBarRevealSettled(wl_output* output, std::string_view barName) {
+  if (!m_attachedOpenAnimationPending || !isAttachedOpen() || m_output != output) {
+    return;
+  }
+  if (!m_sourceBarName.empty() && !barName.empty() && m_sourceBarName != barName) {
+    return;
+  }
+  startAttachedOpenAnimation();
+  requestFrameTick();
+}
+
 void PanelManager::registerPanel(const std::string& id, std::unique_ptr<Panel> content) {
   m_panels[id] = std::move(content);
 }
@@ -307,6 +322,10 @@ void PanelManager::registerPanel(const std::string& id, std::unique_ptr<Panel> c
 void PanelManager::openPanel(const std::string& panelId, PanelOpenRequest request) {
   if (m_inTransition) {
     return;
+  }
+
+  if (m_closeDesktopWidgetsEditor) {
+    m_closeDesktopWidgetsEditor();
   }
 
   // If a panel is open or closing, destroy it immediately with no close animation.
@@ -337,10 +356,10 @@ void PanelManager::openPanel(const std::string& panelId, PanelOpenRequest reques
   const bool isLeft = barConfig.position == "left";
   const bool isRight = barConfig.position == "right";
   const std::int32_t panelGap = m_config->config().shell.panel.floatingOffset;
-  const std::int32_t screenPadding = static_cast<std::int32_t>(Style::spaceSm);
+  const auto screenPadding = static_cast<std::int32_t>(Style::spaceSm);
 
-  std::int32_t outputWidth = static_cast<std::int32_t>(panelWidth);
-  std::int32_t outputHeight = static_cast<std::int32_t>(panelHeight);
+  auto outputWidth = static_cast<std::int32_t>(panelWidth);
+  auto outputHeight = static_cast<std::int32_t>(panelHeight);
   if (m_platform != nullptr) {
     const auto* wlOutput = m_platform->findOutputByWl(request.output);
     if (wlOutput != nullptr && wlOutput->width > 0) {
@@ -614,11 +633,11 @@ void PanelManager::openPanel(const std::string& panelId, PanelOpenRequest reques
       return static_cast<std::int32_t>(std::ceil(barR + cornerRadius));
     };
     // Bar corner radii at the attachment edge.
-    const float barRStart = static_cast<float>(
+    const auto barRStart = static_cast<float>(
         barIsVertical ? (barIsLeft ? barConfig.radiusTopRight : barConfig.radiusTopLeft)
                       : (barIsBottom ? barConfig.radiusTopLeft : barConfig.radiusBottomLeft)
     );
-    const float barREnd = static_cast<float>(
+    const auto barREnd = static_cast<float>(
         barIsVertical ? (barIsLeft ? barConfig.radiusBottomRight : barConfig.radiusBottomLeft)
                       : (barIsBottom ? barConfig.radiusTopRight : barConfig.radiusBottomRight)
     );
@@ -676,8 +695,8 @@ void PanelManager::openPanel(const std::string& panelId, PanelOpenRequest reques
     // Convert panel screen coords to bar-surface-local coords for shadow exclusion.
     // Bar surface origin sits one shadow bleed inset from the visible bar top-left.
     const auto barShadowBleed = shell::surface_shadow::bleed(barConfig.shadow, shadowConfig);
-    std::int32_t barSurfaceLocalVisualX = visualX;
-    std::int32_t barSurfaceLocalVisualY = visualY;
+    std::int32_t barSurfaceLocalVisualX;
+    std::int32_t barSurfaceLocalVisualY;
     if (barIsVertical) {
       barSurfaceLocalVisualY = visualY - (barTop - std::min(mEnds, barShadowBleed.up));
       const std::int32_t barSurfaceOriginX =
@@ -961,7 +980,7 @@ void PanelManager::closePanel(bool animateClose) {
     } else {
       m_animations.cancelForOwner(m_sceneRoot.get());
       m_animations.animate(
-          m_detachedRevealProgress, 0.0f, Style::animFast, Easing::EaseInOutQuad,
+          m_detachedRevealProgress, 0.0f, Style::animNormal, Easing::EaseInOutCubic,
           [this](float v) { applyDetachedReveal(v); },
           [this, gen]() {
             DeferredCall::callLater([this, gen]() {
@@ -1451,14 +1470,12 @@ void PanelManager::applyDetachedReveal(float progress) {
     return;
   }
   // Scale the entire scene from 0.95 to 1.0 around the surface center.
-  // Opacity is not animated because the compositor blur region is not opacity-aware.
   const float s = 1.0f - 0.05f * (1.0f - m_detachedRevealProgress);
   m_sceneRoot->setScale(s);
-  // Fade only the content layer. The background must stay fully opaque so the
-  // compositor blur region is always covered by an opaque rect.
-  if (m_contentNode != nullptr) {
-    m_contentNode->setOpacity(m_detachedRevealProgress);
-  }
+  // Fade the whole panel (background + content) uniformly. The compositor blur region
+  // is not opacity-aware, so we gate it in applyPanelCompositorBlur() to stay cleared
+  // while the panel is mostly translucent.
+  m_sceneRoot->setOpacity(m_detachedRevealProgress);
   applyPanelCompositorBlur();
 }
 
@@ -1570,6 +1587,15 @@ void PanelManager::applyPanelCompositorBlur() {
   }
 
   if (!m_attachedToBar) {
+    // The blur region is not opacity-aware: while the detached panel is still mostly
+    // translucent a submitted region would show through as a blurred blob, so keep it
+    // cleared until the panel is opaque enough. This works the same during both fade in/out.
+    const float kBlurRevealThreshold = 0.6f;
+    if (m_detachedRevealProgress < kBlurRevealThreshold) {
+      m_surface->clearBlurRegion();
+      return;
+    }
+
     const float progress = std::clamp(m_detachedRevealProgress, 0.0f, 1.0f);
     const float s = 1.0f - 0.05f * (1.0f - progress);
     const int scaledW = static_cast<int>(std::lround(static_cast<float>(bw) * s));
@@ -1586,8 +1612,8 @@ void PanelManager::applyPanelCompositorBlur() {
       m_surface->clearBlurRegion();
       return;
     }
-    const float panelW = static_cast<float>(m_panelVisualWidth);
-    const float panelH = static_cast<float>(m_panelVisualHeight);
+    const auto panelW = static_cast<float>(m_panelVisualWidth);
+    const auto panelH = static_cast<float>(m_panelVisualHeight);
     switch (m_attachedRevealDirection) {
     case AttachedRevealDirection::Down:
       by -= static_cast<int>(std::lround(panelH * (1.0f - progress)));
@@ -1878,8 +1904,8 @@ void PanelManager::buildScene(std::uint32_t width, std::uint32_t height) {
   }
   applyAttachedReveal(m_attachedRevealProgress);
 
-  const float panelX = static_cast<float>(m_panelInsetX);
-  const float panelY = static_cast<float>(m_panelInsetY);
+  const auto panelX = static_cast<float>(m_panelInsetX);
+  const auto panelY = static_cast<float>(m_panelInsetY);
   const float panelW = m_panelVisualWidth > 0 ? static_cast<float>(m_panelVisualWidth) : w;
   const float panelH = m_panelVisualHeight > 0 ? static_cast<float>(m_panelVisualHeight) : h;
   const float attachedRadius = m_attachedToBar ? Style::scaledRadiusXl(m_activePanel->contentScale()) : 0.0f;
@@ -1896,8 +1922,8 @@ void PanelManager::buildScene(std::uint32_t width, std::uint32_t height) {
         m_config->config().shell.panel.shadow && shell::surface_shadow::enabled(true, shadowConfig);
     m_panelShadowNode->setVisible(panelShadow);
     const auto shadowOff = shadowDirectionOffset(shadowConfig.direction);
-    const float shadowOffsetX = static_cast<float>(shadowOff.x);
-    const float shadowOffsetY = static_cast<float>(shadowOff.y);
+    const auto shadowOffsetX = static_cast<float>(shadowOff.x);
+    const auto shadowOffsetY = static_cast<float>(shadowOff.y);
     m_panelShadowNode->setPosition(bgX + shadowOffsetX, bgY + shadowOffsetY);
     m_panelShadowNode->setSize(bgW, bgH);
     if (!m_attachedToBar && panelShadow) {
@@ -2032,7 +2058,7 @@ void PanelManager::registerIpc(IpcService& ipc) {
     for (const auto& entry : m_panels) {
       ids.push_back(entry.first);
     }
-    std::sort(ids.begin(), ids.end());
+    std::ranges::sort(ids);
 
     std::string error = "error: unknown panel \"" + std::string(panelId) + "\"";
     if (!ids.empty()) {

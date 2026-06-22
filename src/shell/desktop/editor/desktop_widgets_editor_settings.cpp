@@ -4,15 +4,16 @@
 #include "render/render_context.h"
 #include "render/scene/input_area.h"
 #include "shell/desktop/desktop_widget_settings_registry.h"
+#include "shell/desktop/editor/desktop_widgets_editor.h"
 #include "shell/lockscreen/lockscreen_login_box.h"
 #include "shell/settings/color_spec_picker.h"
 #include "shell/settings/settings_content_common.h"
 #include "shell/settings/widget_settings_registry.h"
-#include "shell/widgets_editor/background_widgets_editor.h"
 #include "ui/builders.h"
 #include "ui/controls/input.h"
 #include "ui/controls/slider.h"
 #include "ui/dialogs/file_dialog.h"
+#include "ui/dialogs/glyph_picker_dialog.h"
 #include "ui/palette.h"
 #include "ui/style.h"
 #include "wayland/layer_surface.h"
@@ -25,9 +26,11 @@
 
 namespace {
 
-  constexpr float kInspectorWidth = 340.0f;
+  constexpr float kInspectorWidth = 520.0f;
+  constexpr float kInspectorCloseSize = 22.0f;
   constexpr float kSettingRowHeight = 34.0f;
-  constexpr float kLabelWidth = 100.0f;
+  constexpr float kSettingLabelFlexGrow = 3.0f;
+  constexpr float kSettingControlFlexGrow = 2.0f;
 
   using Settings = std::unordered_map<std::string, WidgetSettingValue>;
 
@@ -165,7 +168,7 @@ namespace {
         .gap = Style::spaceSm,
         .minWidth = 0.0f,
         .fillWidth = true,
-        .flexGrow = 1.0f,
+        .flexGrow = kSettingControlFlexGrow,
     });
     controlSlot->addChild(std::move(control));
 
@@ -180,17 +183,17 @@ namespace {
             .text = std::string(labelText),
             .fontSize = Style::fontSizeCaption,
             .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-            .minWidth = kLabelWidth,
-            .maxWidth = kLabelWidth,
+            .minWidth = 0.0f,
             .textAlign = TextAlign::Start,
             .ellipsize = TextEllipsize::End,
+            .flexGrow = kSettingLabelFlexGrow,
         }),
         std::move(controlSlot)
     );
   }
 
   std::unique_ptr<Flex> makeSliderControl(
-      double value, double minVal, double maxVal, double step, bool integerValue, BackgroundWidgetsEditor* editor,
+      double value, double minVal, double maxVal, double step, bool integerValue, DesktopWidgetsEditor* editor,
       const std::string& key
   ) {
     Input* valueInputPtr = nullptr;
@@ -261,8 +264,7 @@ namespace {
   }
 
   std::unique_ptr<Flex> makeToggleRow(
-      std::string_view labelText, const std::string& key, bool fallback, const Settings& s,
-      BackgroundWidgetsEditor* editor
+      std::string_view labelText, const std::string& key, bool fallback, const Settings& s, DesktopWidgetsEditor* editor
   ) {
     return makeRow(
         labelText,
@@ -275,7 +277,7 @@ namespace {
 
   std::unique_ptr<Flex> makeSliderRow(
       std::string_view labelText, const std::string& key, double fallback, double minVal, double maxVal, double step,
-      const Settings& s, BackgroundWidgetsEditor* editor
+      const Settings& s, DesktopWidgetsEditor* editor
   ) {
     return makeRow(labelText, makeSliderControl(getDouble(s, key, fallback), minVal, maxVal, step, false, editor, key));
   }
@@ -284,7 +286,7 @@ namespace {
   // schema's Int type (plugin manifest int settings).
   std::unique_ptr<Flex> makeIntSliderRow(
       std::string_view labelText, const std::string& key, double fallback, double minVal, double maxVal, double step,
-      const Settings& s, BackgroundWidgetsEditor* editor
+      const Settings& s, DesktopWidgetsEditor* editor
   ) {
     return makeRow(
         labelText,
@@ -294,7 +296,7 @@ namespace {
 
   std::unique_ptr<Flex> makeStepperRow(
       std::string_view labelText, const std::string& key, int fallback, int minVal, int maxVal, int step,
-      const std::optional<std::string>& valueSuffix, const Settings& s, BackgroundWidgetsEditor* editor
+      const std::optional<std::string>& valueSuffix, const Settings& s, DesktopWidgetsEditor* editor
   ) {
     const int currentValue =
         std::clamp(static_cast<int>(std::llround(getDouble(s, key, static_cast<double>(fallback)))), minVal, maxVal);
@@ -316,7 +318,7 @@ namespace {
 
   std::unique_ptr<Flex> makeColorSpecRow(
       std::string_view labelText, const std::string& key, std::string fallbackValue, const Settings& s,
-      BackgroundWidgetsEditor* editor
+      DesktopWidgetsEditor* editor
   ) {
     settings::ColorSpecSelectOptions options{
         .roles = {},
@@ -335,9 +337,50 @@ namespace {
     return makeRow(labelText, std::move(select));
   }
 
+  std::unique_ptr<Flex> makeGlyphRow(
+      std::string_view labelText, const std::string& key, const std::string& value, DesktopWidgetsEditor* editor
+  ) {
+    auto input = ui::input({
+        .value = value,
+        .controlHeight = Style::controlHeightSm,
+        .flexGrow = 1.0f,
+        .onChange = [editor, key](const std::string& val) { editor->applySettingChange(key, val); },
+    });
+    auto picker = ui::button({
+        .glyph = "apps",
+        .glyphSize = Style::fontSizeBody,
+        .variant = ButtonVariant::Outline,
+        .minWidth = Style::controlHeightSm,
+        .minHeight = Style::controlHeightSm,
+        .paddingV = Style::spaceXs,
+        .paddingH = Style::spaceSm,
+        .onClick = [editor, key, currentValue = value]() {
+          GlyphPickerDialogOptions options;
+          if (!currentValue.empty()) {
+            options.initialGlyph = currentValue;
+          }
+          (void)GlyphPickerDialog::open(std::move(options), [editor, key](std::optional<GlyphPickerResult> result) {
+            if (!result.has_value()) {
+              return;
+            }
+            editor->applySettingChange(key, result->name);
+          });
+        },
+    });
+    auto row = ui::row({
+        .align = FlexAlign::Center,
+        .gap = Style::spaceSm,
+        .fillWidth = true,
+        .flexGrow = 1.0f,
+    });
+    row->addChild(std::move(input));
+    row->addChild(std::move(picker));
+    return makeRow(labelText, std::move(row));
+  }
+
   std::unique_ptr<Flex> makeInputRow(
       std::string_view labelText, const std::string& key, const std::string& value, const std::string& placeholder,
-      BackgroundWidgetsEditor* editor
+      DesktopWidgetsEditor* editor
   ) {
     return makeRow(
         labelText,
@@ -352,7 +395,7 @@ namespace {
   }
 
   std::unique_ptr<Flex>
-  makeFilePickerRow(std::string_view labelText, const std::string& key, BackgroundWidgetsEditor* editor) {
+  makeFilePickerRow(std::string_view labelText, const std::string& key, DesktopWidgetsEditor* editor) {
     return makeRow(
         labelText,
         ui::button({
@@ -377,7 +420,7 @@ namespace {
   std::unique_ptr<Flex> makeSelectRow(
       std::string_view labelText, const std::string& key,
       const std::vector<settings::WidgetSettingSelectOption>& options, const std::string& currentValue,
-      bool literalLabels, BackgroundWidgetsEditor* editor
+      bool literalLabels, DesktopWidgetsEditor* editor
   ) {
     std::vector<std::string> labels;
     std::vector<std::string> values;
@@ -412,7 +455,7 @@ namespace {
   std::unique_ptr<Flex> makeSegmentedRow(
       std::string_view labelText, const std::string& key,
       const std::vector<settings::WidgetSettingSelectOption>& options, const std::string& currentValue,
-      BackgroundWidgetsEditor* editor
+      DesktopWidgetsEditor* editor
   ) {
     std::vector<std::string> values;
     values.reserve(options.size());
@@ -434,7 +477,6 @@ namespace {
         ui::segmented({
             .options = std::move(segmentOptions),
             .selectedIndex = selectedIndex,
-            .flexGrow = 1.0f,
             .onChange = [editor, key, values = std::move(values)](std::size_t index) {
               if (index < values.size()) {
                 editor->applySettingChange(key, values[index]);
@@ -446,7 +488,7 @@ namespace {
 
   void addSpecSettings(
       Flex& content, const std::vector<settings::WidgetSettingSpec>& specs, const Settings& s,
-      BackgroundWidgetsEditor* editor
+      DesktopWidgetsEditor* editor
   ) {
     for (const auto& spec : specs) {
       if (!isSpecVisible(spec, s, specs)) {
@@ -504,6 +546,13 @@ namespace {
         break;
       }
 
+      case settings::WidgetControlKind::Glyph: {
+        const auto* defVal = std::get_if<std::string>(&spec.schema.defaultValue);
+        const std::string fallback = defVal != nullptr ? *defVal : std::string{};
+        content.addChild(makeGlyphRow(label, spec.schema.key, getStr(s, spec.schema.key, fallback), editor));
+        break;
+      }
+
       case settings::WidgetControlKind::Select: {
         const auto* defVal = std::get_if<std::string>(&spec.schema.defaultValue);
         const std::string fallback = defVal != nullptr ? *defVal : std::string{};
@@ -551,7 +600,7 @@ namespace {
     );
   }
 
-  std::unique_ptr<Flex> makeResetDefaultsRow(BackgroundWidgetsEditor* editor, std::function<void()> onReset) {
+  std::unique_ptr<Flex> makeResetDefaultsRow(DesktopWidgetsEditor* editor, std::function<void()> onReset) {
     return ui::row(
         {
             .justify = FlexJustify::End,
@@ -572,7 +621,7 @@ namespace {
 
   void addSettingsSection(
       Flex& content, const std::vector<settings::WidgetSettingSpec>& specs, const Settings& s,
-      BackgroundWidgetsEditor* editor, std::string_view labelKey, bool separator
+      DesktopWidgetsEditor* editor, std::string_view labelKey, bool separator
   ) {
     if (!hasVisibleSpecs(specs, s)) {
       return;
@@ -582,14 +631,14 @@ namespace {
     addSpecSettings(content, specs, s, editor);
   }
 
-  void addBackgroundSection(Flex& content, const Settings& s, BackgroundWidgetsEditor* editor, std::string_view type) {
+  void addBackgroundSection(Flex& content, const Settings& s, DesktopWidgetsEditor* editor, std::string_view type) {
     const auto specs = desktop_settings::commonDesktopWidgetSettingSpecs(type);
     addSettingsSection(content, specs, s, editor, "desktop-widgets.editor.settings.background-section", true);
   }
 
 } // namespace
 
-void BackgroundWidgetsEditor::applySettingChange(const std::string& key, WidgetSettingValue value) {
+void DesktopWidgetsEditor::applySettingChange(const std::string& key, WidgetSettingValue value) {
   deferEditorMutation([this, key, value = std::move(value)]() {
     auto* state = findWidgetState(m_selectedWidgetId);
     if (state == nullptr) {
@@ -614,13 +663,16 @@ void BackgroundWidgetsEditor::applySettingChange(const std::string& key, WidgetS
     const bool rebuildInspector = settingChangeAffectsInspectorVisibility(state->type, key) || key == "background";
 
     if (view.widget != nullptr && view.widget->applySetting(key, value, state->settings, *m_renderContext)) {
-      view.intrinsicWidth = std::max(1.0f, view.widget->intrinsicWidth());
-      view.intrinsicHeight = std::max(1.0f, view.widget->intrinsicHeight());
-      applyViewState(view, *state, false);
+      if (state->type == "button" && (key == "label" || key == "glyph")) {
+        state->boxWidth = 0.0f;
+        state->boxHeight = 0.0f;
+      }
+      applyViewState(view, *state, true);
       updateSelectionVisuals(*surface);
       if (rebuildInspector) {
         requestLayout();
       } else if (surface->surface != nullptr) {
+        surface->surface->requestLayout();
         surface->surface->requestRedraw();
       }
       return;
@@ -640,7 +692,7 @@ void BackgroundWidgetsEditor::applySettingChange(const std::string& key, WidgetS
     }
 
     newWidget->create();
-    if (state->type == "audio_visualizer" || state->type == "fancy_audio_visualizer") {
+    if (state->type == "audio_visualizer" || state->type == "fancy_audio_visualizer" || state->type == "button") {
       newWidget->setEditorPreview(true);
     }
     newWidget->setAnimationManager(&surface->animations);
@@ -687,7 +739,7 @@ void BackgroundWidgetsEditor::applySettingChange(const std::string& key, WidgetS
   });
 }
 
-void BackgroundWidgetsEditor::resetSelectedWidgetSettings() {
+void DesktopWidgetsEditor::resetSelectedWidgetSettings() {
   deferEditorMutation([this]() {
     auto* state = findWidgetState(m_selectedWidgetId);
     if (state == nullptr) {
@@ -702,7 +754,7 @@ void BackgroundWidgetsEditor::resetSelectedWidgetSettings() {
   });
 }
 
-void BackgroundWidgetsEditor::buildInspector(
+void DesktopWidgetsEditor::buildInspector(
     OverlaySurface& surface, Node& root, const DesktopWidgetState& selectedState
 ) {
   auto handleArea = std::make_unique<InputArea>();
@@ -748,6 +800,7 @@ void BackgroundWidgetsEditor::buildInspector(
 
   Flex* panelPtr = nullptr;
   Flex* handlePtr = nullptr;
+  Flex* dragHandlePtr = nullptr;
   const float panelRadius = Style::scaledRadiusXl();
   auto panel = ui::column(
       {
@@ -769,8 +822,7 @@ void BackgroundWidgetsEditor::buildInspector(
           {
               .out = &handlePtr,
               .align = FlexAlign::Center,
-              .justify = FlexJustify::Center,
-              .gap = Style::spaceXs,
+              .gap = Style::spaceSm,
               .paddingV = Style::spaceXs,
               .paddingH = Style::spaceMd,
               .fill = colorSpecFromRole(ColorRole::SurfaceVariant, 0.85f),
@@ -779,14 +831,46 @@ void BackgroundWidgetsEditor::buildInspector(
               .width = kInspectorWidth,
               .configure = [panelRadius](Flex& flex) { flex.setRadii(Radii(panelRadius, panelRadius, 0.0f, 0.0f)); },
           },
-          ui::glyph({
-              .glyph = "menu-2",
-              .glyphSize = 14.0f,
-          }),
-          ui::label({
-              .text = desktop_settings::desktopWidgetTypeLabel(selectedState.type),
-              .fontSize = Style::fontSizeBody,
-              .fontWeight = FontWeight::Bold,
+          ui::row(
+              {
+                  .out = &dragHandlePtr,
+                  .align = FlexAlign::Center,
+                  .gap = Style::spaceXs,
+                  .paddingV = Style::spaceXs,
+                  .paddingH = Style::spaceSm,
+                  .minHeight = Style::controlHeightSm,
+              },
+              ui::glyph({
+                  .glyph = "menu-2",
+                  .glyphSize = 14.0f,
+              }),
+              ui::label({
+                  .text = desktop_settings::desktopWidgetTypeLabel(selectedState.type),
+                  .fontSize = Style::fontSizeBody,
+                  .fontWeight = FontWeight::Bold,
+              }),
+              std::move(handleArea)
+          ),
+          ui::spacer(),
+          ui::button({
+              .glyph = "close",
+              .glyphSize = 12.0f,
+              .variant = ButtonVariant::Ghost,
+              .minWidth = kInspectorCloseSize,
+              .minHeight = kInspectorCloseSize,
+              .maxWidth = kInspectorCloseSize,
+              .maxHeight = kInspectorCloseSize,
+              .padding = 2.0f,
+              .radius = Style::scaledRadiusSm(),
+              .width = kInspectorCloseSize,
+              .height = kInspectorCloseSize,
+              .onClick =
+                  [this]() {
+                    deferEditorMutation([this]() {
+                      m_inspectorOpen = false;
+                      requestLayout();
+                    });
+                  },
           })
       ),
       std::move(scrollView)
@@ -794,10 +878,9 @@ void BackgroundWidgetsEditor::buildInspector(
 
   surface.inspector = panelPtr;
   root.addChild(std::move(panel));
-  panelPtr->addChild(std::move(handleArea));
   panelPtr->layout(*m_renderContext);
   handleAreaPtr->setPosition(0.0f, 0.0f);
-  handleAreaPtr->setFrameSize(panelPtr->width(), handlePtr->height());
+  handleAreaPtr->setFrameSize(dragHandlePtr->width(), dragHandlePtr->height());
 
   if (!surface.inspectorPositionInitialized && surface.toolbar != nullptr) {
     surface.inspectorX = surface.toolbarX;

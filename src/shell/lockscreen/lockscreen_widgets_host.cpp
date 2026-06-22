@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <string>
+#include <wayland-client.h>
 
 namespace {
 
@@ -30,15 +31,11 @@ namespace {
 
 } // namespace
 
-void LockscreenWidgetsHost::initialize(
-    WaylandConnection& wayland, ConfigService* config, PipeWireSpectrum* pipewireSpectrum,
-    const WeatherService* weather, RenderContext* renderContext, MprisService* mpris, HttpClient* httpClient,
-    SystemMonitorService* sysmon, DesktopWidgetScriptDeps scriptDeps
-) {
-  m_wayland = &wayland;
-  m_config = config;
-  m_renderContext = renderContext;
-  m_factory = std::make_unique<DesktopWidgetFactory>(pipewireSpectrum, weather, mpris, httpClient, sysmon, scriptDeps);
+void LockscreenWidgetsHost::initialize(const DesktopWidgetServices& services) {
+  m_wayland = &services.wayland;
+  m_config = services.config;
+  m_renderContext = services.renderContext;
+  m_factory = std::make_unique<DesktopWidgetFactory>(services.runtime);
 }
 
 void LockscreenWidgetsHost::show(const LockscreenWidgetsSnapshot& snapshot, LockScreen& lockScreen) {
@@ -208,9 +205,12 @@ void LockscreenWidgetsHost::createInstance(
 
   widget->create();
   widget->setBox(state.boxWidth, state.boxHeight);
-  m_renderContext->makeCurrent(surface.renderTarget());
-  widget->update(*m_renderContext);
-  widget->layout(*m_renderContext);
+
+  if (surface.renderTarget().isReady()) {
+    m_renderContext->makeCurrent(surface.renderTarget());
+    widget->update(*m_renderContext);
+    widget->layout(*m_renderContext);
+  }
 
   const float intrinsicWidth = std::max(1.0f, widget->intrinsicWidth());
   const float intrinsicHeight = std::max(1.0f, widget->intrinsicHeight());
@@ -278,7 +278,7 @@ void LockscreenWidgetsHost::syncSurfaceFrameTick(LockSurface* surfacePtr) {
     return;
   }
 
-  const bool hasWidgets = std::any_of(m_instances.begin(), m_instances.end(), [&](const auto& instance) {
+  const bool hasWidgets = std::ranges::any_of(m_instances, [&](const auto& instance) {
     return instance->surface == surfacePtr && instance->widget != nullptr;
   });
   if (!hasWidgets) {
@@ -341,8 +341,8 @@ void LockscreenWidgetsHost::prepareFrame(LockSurface& surface, bool needsUpdate,
   m_renderContext->makeCurrent(surface.renderTarget());
 
   const float baseUiScale = m_config != nullptr ? m_config->config().shell.uiScale : 1.0f;
-  const float surfaceW = static_cast<float>(surface.width());
-  const float surfaceH = static_cast<float>(surface.height());
+  const auto surfaceW = static_cast<float>(surface.width());
+  const auto surfaceH = static_cast<float>(surface.height());
 
   Node* layer = surface.widgetLayer();
   if (layer != nullptr) {
@@ -368,9 +368,30 @@ void LockscreenWidgetsHost::prepareFrame(LockSurface& surface, bool needsUpdate,
     }
 
     if (m_wayland != nullptr) {
+      DesktopWidgetState currentState = instance->state;
+      if (const DesktopWidgetState* origState = findStateById(m_snapshot, instance->state.id); origState != nullptr) {
+        currentState = *origState;
+      }
+      if (const WaylandOutput* output = desktop_widgets::resolveStateOutput(*m_wayland, currentState);
+          output != nullptr) {
+        float curW = surfaceW;
+        float curH = surfaceH;
+        bool isRotated90or270 =
+            (output->transform == WL_OUTPUT_TRANSFORM_90
+             || output->transform == WL_OUTPUT_TRANSFORM_270
+             || output->transform == WL_OUTPUT_TRANSFORM_FLIPPED_90
+             || output->transform == WL_OUTPUT_TRANSFORM_FLIPPED_270);
+        float refW = isRotated90or270 ? curH : curW;
+        float refH = isRotated90or270 ? curW : curH;
+        if (refW > 0.0f && refH > 0.0f) {
+          currentState.cx = currentState.cx * (curW / refW);
+          currentState.cy = currentState.cy * (curH / refH);
+        }
+      }
       desktop_widgets::clampStateToOutput(
-          *m_wayland, instance->state, instance->intrinsicWidth, instance->intrinsicHeight
+          *m_wayland, currentState, instance->intrinsicWidth, instance->intrinsicHeight
       );
+      instance->state = currentState;
     }
 
     if (instance->transformNode == nullptr) {

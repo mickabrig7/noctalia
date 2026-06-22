@@ -1,5 +1,6 @@
 #include "shell/dock/dock_context_menu.h"
 
+#include "compositors/compositor_detect.h"
 #include "compositors/compositor_platform.h"
 #include "config/config_service.h"
 #include "core/deferred_call.h"
@@ -128,6 +129,7 @@ namespace shell::dock {
     auto menu = std::make_unique<DockPopup>();
 
     // Collect running windows for "Close" / "Close All" entries.
+    menu->windows = windows;
     for (const auto& w : windows) {
       menu->handles.push_back(w.handle);
     }
@@ -156,7 +158,9 @@ namespace shell::dock {
           ContextMenuControlEntry{
               .id = kMenuWindowBaseId - static_cast<std::int32_t>(i),
               .label = title,
-              .enabled = windows[i].handle != nullptr,
+              .enabled = windows[i].handle != nullptr
+                  || !windows[i].identifier.empty()
+                  || (compositors::isKde() && (!windows[i].title.empty() || !windows[i].appId.empty())),
               .separator = false,
               .hasSubmenu = false,
           }
@@ -267,8 +271,8 @@ namespace shell::dock {
 
     const auto sb = shell::surface_shadow::bleed(dockConfig.shadow, config.config().shell.shadow);
     const std::int32_t panelThk = shell::dock::dockThickness(dockConfig);
-    const std::int32_t ptrX = static_cast<std::int32_t>(platform.lastPointerX());
-    const std::int32_t ptrY = static_cast<std::int32_t>(platform.lastPointerY());
+    const auto ptrX = static_cast<std::int32_t>(platform.lastPointerX());
+    const auto ptrY = static_cast<std::int32_t>(platform.lastPointerY());
     const std::int32_t halfCell = dockConfig.iconSize / 2;
 
     // Anchor rect: pointer-centred on main axis x panel face on cross axis.
@@ -383,8 +387,8 @@ namespace shell::dock {
             }
           } else if (id <= kMenuWindowBaseId) {
             const auto idx = static_cast<std::size_t>(kMenuWindowBaseId - id);
-            if (idx < menuHandles.size() && menuHandles[idx] != nullptr && callbacks.activateWindow) {
-              callbacks.activateWindow(menuHandles[idx]);
+            if (idx < menuHandles.size() && callbacks.activateWindow) {
+              callbacks.activateWindow(idx);
             }
           } else if (id >= 0) {
             const auto idx = static_cast<std::size_t>(id);

@@ -29,6 +29,7 @@ class Box;
 class Button;
 class AccountsService;
 class ConfigService;
+class CompositorPlatform;
 class DependencyService;
 class Flex;
 class IdleManager;
@@ -53,7 +54,7 @@ public:
 
   void initialize(
       WaylandConnection& wayland, ConfigService* config, RenderContext* renderContext, DependencyService* dependencies,
-      UPowerService* upower, IdleManager* idleManager, AccountsService* accounts = nullptr
+      UPowerService* upower, IdleManager* idleManager, CompositorPlatform* platform, AccountsService* accounts = nullptr
   );
 
   void open();
@@ -126,12 +127,8 @@ private:
   void openActionsMenu();
   void openConfigExportDialog();
   void openBarWidgetAddPopup(const std::vector<std::string>& lanePath);
-  // Parameters are taken by value: opening the popup closes the editor sheet, which can own the control
-  // whose callback forwarded these arguments, so copies must outlive that destruction.
-  void openSearchPickerPopup(
-      std::string title, std::vector<settings::SelectOption> options, std::string selectedValue,
-      std::string placeholder, std::string emptyText, std::vector<std::string> settingPath
-  );
+  // Request is taken by value because opening the popup can close the sheet that owns the forwarding control.
+  void openSearchPickerPopup(settings::SearchPickerOpenRequest request);
   void openSessionActionEntryEditor(std::size_t index);
   void syncSessionActionInlineSummary(std::size_t index, const SessionPanelActionConfig& row);
   void openIdleBehaviorEntryEditor(std::size_t index);
@@ -172,6 +169,7 @@ private:
   void dismissOpenSelectDropdown();
 
   WaylandConnection* m_wayland = nullptr;
+  CompositorPlatform* m_platform = nullptr;
   IdleManager* m_idleManager = nullptr;
   ConfigService* m_config = nullptr;
   scripting::PluginManager* m_pluginManager = nullptr;

@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "util/string_utils.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
@@ -194,6 +195,7 @@ namespace {
               .title = StringUtils::windowTitleSingleLine(jsonStringValue(node, "name")),
               .x = x,
               .y = y,
+              .outputName = {},
           }
       );
     }
@@ -473,7 +475,7 @@ void SwayWorkspaceBackend::sendMessage(std::uint32_t type, const std::string& pa
     return;
   }
 
-  const std::uint32_t payloadLength = static_cast<std::uint32_t>(payload.size());
+  const auto payloadLength = static_cast<std::uint32_t>(payload.size());
   std::vector<char> message;
   message.reserve(kIpcMagic.size() + sizeof(payloadLength) + sizeof(type) + payload.size());
   message.insert(message.end(), kIpcMagic.begin(), kIpcMagic.end());
@@ -608,7 +610,7 @@ void SwayWorkspaceBackend::parseWorkspaceList(const std::string& payload) {
       }
     }
 
-    std::sort(next.begin(), next.end(), [](const auto& a, const auto& b) {
+    std::ranges::sort(next, [](const auto& a, const auto& b) {
       if ((a.num >= 0) != (b.num >= 0)) {
         return a.num >= 0;
       }

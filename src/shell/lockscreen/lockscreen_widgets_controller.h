@@ -13,7 +13,7 @@ class DesktopWidgetsController;
 class HttpClient;
 class IpcService;
 class LockScreen;
-class BackgroundWidgetsEditor;
+class DesktopWidgetsEditor;
 class LockscreenWidgetsHost;
 class MprisService;
 class PipeWireSpectrum;
@@ -27,6 +27,14 @@ struct PointerEvent;
 
 using LockscreenWidgetsSnapshot = LockscreenWidgetsConfig;
 
+struct LockscreenWidgetsControllerServices {
+  DesktopWidgetServices widgets;
+  LockScreen& lockScreen;
+  Bar& bar;
+  Dock& dock;
+  DesktopWidgetsController* desktopWidgets = nullptr;
+};
+
 class LockscreenWidgetsController {
 public:
   LockscreenWidgetsController();
@@ -35,12 +43,7 @@ public:
   LockscreenWidgetsController(const LockscreenWidgetsController&) = delete;
   LockscreenWidgetsController& operator=(const LockscreenWidgetsController&) = delete;
 
-  void initialize(
-      WaylandConnection& wayland, ConfigService* config, LockScreen& lockScreen, Bar& bar, Dock& dock,
-      DesktopWidgetsController* desktopWidgets, PipeWireSpectrum* pipewireSpectrum, const WeatherService* weather,
-      RenderContext* renderContext, MprisService* mpris, HttpClient* httpClient, SystemMonitorService* sysmon,
-      SharedTextureCache* textureCache, DesktopWidgetScriptDeps scriptDeps = {}
-  );
+  void initialize(const LockscreenWidgetsControllerServices& services);
 
   void registerIpc(IpcService& ipc);
   void onLockStateChanged();
@@ -77,5 +80,5 @@ private:
   LockscreenWidgetsSnapshot m_snapshot;
   bool m_initialized = false;
   std::unique_ptr<LockscreenWidgetsHost> m_host;
-  std::unique_ptr<BackgroundWidgetsEditor> m_editor;
+  std::unique_ptr<DesktopWidgetsEditor> m_editor;
 };

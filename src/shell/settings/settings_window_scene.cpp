@@ -1,11 +1,12 @@
 #include "compositors/compositor_detect.h"
+#include "compositors/compositor_platform.h"
 #include "config/config_service.h"
 #include "core/ui_phase.h"
 #include "dbus/upower/upower_service.h"
 #include "i18n/i18n.h"
 #include "render/render_context.h"
-#include "shell/avatar_path.h"
 #include "shell/greeter/greeter_appearance_sync.h"
+#include "shell/profile/avatar_path.h"
 #include "shell/settings/font_family_catalog.h"
 #include "shell/settings/settings_bar_management.h"
 #include "shell/settings/settings_content.h"
@@ -100,8 +101,8 @@ namespace {
         continue;
       }
       const bool present = descriptor.alwaysShow
-          || std::find_if(
-                 entries.begin(), entries.end(), [section = descriptor.section](const settings::SettingEntry& entry) {
+          || std::ranges::find_if(
+                 entries, [section = descriptor.section](const settings::SettingEntry& entry) {
                    return entry.section == section;
                  }
              ) != entries.end();
@@ -113,7 +114,7 @@ namespace {
   }
 
   bool containsPath(const std::vector<std::vector<std::string>>& paths, const std::vector<std::string>& path) {
-    return std::find(paths.begin(), paths.end(), path) != paths.end();
+    return std::ranges::contains(paths, path);
   }
 
   bool settingEntryBelongsToPage(
@@ -396,11 +397,7 @@ settings::SettingsContentContext SettingsWindow::makeContentContext(
       .focusArea = [this](InputArea* area) { m_inputDispatcher.setFocus(area); },
       .openBarWidgetAddPopup = [this](const std::vector<std::string>& lanePath) { openBarWidgetAddPopup(lanePath); },
       .openSearchPickerPopup =
-          [this](
-              const std::string& title, const std::vector<settings::SelectOption>& options,
-              const std::string& selectedValue, const std::string& placeholder, const std::string& emptyText,
-              const std::vector<std::string>& settingPath
-          ) { openSearchPickerPopup(title, options, selectedValue, placeholder, emptyText, settingPath); },
+          [this](settings::SearchPickerOpenRequest request) { openSearchPickerPopup(std::move(request)); },
       .setOverride = setOverride,
       .setOverrides = setOverrides,
       .clearOverride = clearOverride,
@@ -436,6 +433,7 @@ settings::SettingsContentContext SettingsWindow::makeContentContext(
       .afterIdleBehaviorApply = {},
       .afterNotificationFilterApply = {},
       .closeHostedEditor = {},
+      .supportsTaskbarWorkspaceGrouping = m_platform != nullptr && m_platform->supportsTaskbarWorkspaceGrouping(),
   };
 }
 
@@ -868,8 +866,8 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
     return;
   }
 
-  const float w = static_cast<float>(width);
-  const float h = static_cast<float>(height);
+  const auto w = static_cast<float>(width);
+  const auto h = static_cast<float>(height);
   const float scale = uiScale();
   m_actionsMenuButton = nullptr;
   m_contentScrollView = nullptr;
@@ -885,7 +883,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   m_settingsRegistry = settings::buildSettingsRegistry(cfg, nullptr, nullptr, env);
 
   if (m_syncGreeterAppearance && env.greeterSyncAvailable) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Shell
           && e.group == "privacy-security"
           && e.path == std::vector<std::string>{"shell", "password_style"};
@@ -912,7 +910,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_resetLauncherUsage) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Panels
           && e.group == "launcher"
           && e.path == std::vector<std::string>{"shell", "panel", "launcher_sort_by_usage"};
@@ -939,7 +937,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_resetScreenTime) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::System
           && e.group == "screen-time"
           && e.path == std::vector<std::string>{"shell", "screen_time_enabled"};
@@ -966,7 +964,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_saveWallpaperPaletteAsCustom && cfg.theme.source == PaletteSource::Wallpaper) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Appearance
           && e.group == "theme"
           && e.path == std::vector<std::string>{"theme", "wallpaper_scheme"};
@@ -993,7 +991,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_openWallpaperPanel) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Wallpaper
           && e.group == "general"
           && e.path == std::vector<std::string>{"wallpaper", "fill_mode"};
@@ -1017,7 +1015,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_openDesktopWidgetEditor) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Desktop && e.group == "widgets";
     });
     if (it != m_settingsRegistry.end()) {
@@ -1042,7 +1040,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_openLockscreenWidgetEditor) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Security
           && e.group == "lock-screen"
           && e.path == std::vector<std::string>{"lockscreen_widgets", "enabled"};
@@ -1072,7 +1070,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
   }
 
   if (m_config != nullptr) {
-    auto it = std::find_if(m_settingsRegistry.begin(), m_settingsRegistry.end(), [](const settings::SettingEntry& e) {
+    auto it = std::ranges::find_if(m_settingsRegistry, [](const settings::SettingEntry& e) {
       return e.section == settings::SettingsSection::Services
           && e.group == "calendar"
           && e.path == std::vector<std::string>{"calendar", "refresh_minutes"};
@@ -1125,7 +1123,7 @@ void SettingsWindow::buildScene(std::uint32_t width, std::uint32_t height) {
 
   const auto sections = sectionKeys(m_settingsRegistry);
   const auto containsSection = [&sections](settings::SettingsSection section) {
-    return std::find(sections.begin(), sections.end(), section) != sections.end();
+    return std::ranges::contains(sections, section);
   };
   if (m_selectedSection == "bar" && selectedBar == nullptr) {
     m_selectedSection.clear();

@@ -172,7 +172,7 @@ namespace noctalia::theme {
       for (int i = 0; i < n; ++i)
         sortedIdx[static_cast<size_t>(i)] = i;
       // Stable sort so tied L values preserve their original order.
-      std::stable_sort(sortedIdx.begin(), sortedIdx.end(), [&](int a, int b) {
+      std::ranges::stable_sort(sortedIdx, [&](int a, int b) {
         return labs[static_cast<size_t>(a)].L < labs[static_cast<size_t>(b)].L;
       });
 
@@ -210,7 +210,7 @@ namespace noctalia::theme {
         }
         for (int ci = 0; ci < k; ++ci) {
           if (cnt[static_cast<size_t>(ci)] > 0) {
-            const double nd = static_cast<double>(cnt[static_cast<size_t>(ci)]);
+            const auto nd = static_cast<double>(cnt[static_cast<size_t>(ci)]);
             centroids[static_cast<size_t>(ci)] = {
                 acc[static_cast<size_t>(ci)].L / nd, acc[static_cast<size_t>(ci)].a / nd,
                 acc[static_cast<size_t>(ci)].b / nd
@@ -242,9 +242,7 @@ namespace noctalia::theme {
           );
         }
       }
-      std::stable_sort(results.begin(), results.end(), [](const Cluster& a, const Cluster& b) {
-        return a.count > b.count;
-      });
+      std::ranges::stable_sort(results, std::ranges::greater{}, &Cluster::count);
       return results;
     }
 
@@ -307,7 +305,7 @@ namespace noctalia::theme {
         const double score = (chromaScore - tonePenalty - huePenalty) * std::pow(static_cast<double>(count), 0.3);
         out.push_back({color, score});
       }
-      std::stable_sort(out.begin(), out.end(), [](const Scored& a, const Scored& b) { return a.score > b.score; });
+      std::ranges::stable_sort(out, std::ranges::greater{}, &Scored::score);
       return out;
     }
 
@@ -331,11 +329,10 @@ namespace noctalia::theme {
 
       if (families.empty()) {
         std::vector<Scored> result;
+        result.reserve(in.size());
         for (const auto& [color, count] : in)
           result.push_back({color, static_cast<double>(count)});
-        std::stable_sort(result.begin(), result.end(), [](const Scored& a, const Scored& b) {
-          return a.score > b.score;
-        });
+        std::ranges::stable_sort(result, std::ranges::greater{}, &Scored::score);
         return result;
       }
 
@@ -346,15 +343,13 @@ namespace noctalia::theme {
           tot += e.count;
         familyTotals.emplace_back(fam, tot);
       }
-      std::stable_sort(familyTotals.begin(), familyTotals.end(), [](const auto& a, const auto& b) {
-        return a.second > b.second;
-      });
+      std::ranges::stable_sort(familyTotals, std::ranges::greater{}, [](const auto& entry) { return entry.second; });
 
       std::vector<Scored> result;
       for (size_t rank = 0; rank < familyTotals.size(); ++rank) {
         const int fam = familyTotals[rank].first;
         auto& entries = families[fam];
-        std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        std::ranges::stable_sort(entries, [](const Entry& a, const Entry& b) {
           if (a.count != b.count)
             return a.count > b.count;
           return a.chroma > b.chroma;
@@ -366,9 +361,7 @@ namespace noctalia::theme {
           result.push_back({e.color, score});
         }
       }
-      std::stable_sort(result.begin(), result.end(), [](const Scored& a, const Scored& b) {
-        return a.score > b.score;
-      });
+      std::ranges::stable_sort(result, std::ranges::greater{}, &Scored::score);
       return result;
     }
 
@@ -395,11 +388,10 @@ namespace noctalia::theme {
 
       if (families.empty()) {
         std::vector<Scored> result;
+        result.reserve(in.size());
         for (const auto& [color, count] : in)
           result.push_back({color, static_cast<double>(count)});
-        std::stable_sort(result.begin(), result.end(), [](const Scored& a, const Scored& b) {
-          return a.score > b.score;
-        });
+        std::ranges::stable_sort(result, std::ranges::greater{}, &Scored::score);
         return result;
       }
 
@@ -410,9 +402,7 @@ namespace noctalia::theme {
           tot += e.count;
         familyTotals.emplace_back(fam, tot);
       }
-      std::stable_sort(familyTotals.begin(), familyTotals.end(), [](const auto& a, const auto& b) {
-        return a.second > b.second;
-      });
+      std::ranges::stable_sort(familyTotals, std::ranges::greater{}, [](const auto& entry) { return entry.second; });
 
       const int dominantFamily = familyTotals[0].first;
       const double dominantCenter = familyCenterHue(dominantFamily);
@@ -444,7 +434,7 @@ namespace noctalia::theme {
         }
       }
 
-      std::stable_sort(distant.begin(), distant.end(), [](const Distant& a, const Distant& b) {
+      std::ranges::stable_sort(distant, [](const Distant& a, const Distant& b) {
         return a.hueDiff * a.maxChroma > b.hueDiff * b.maxChroma;
       });
 
@@ -452,7 +442,7 @@ namespace noctalia::theme {
       for (size_t rank = 0; rank < distant.size(); ++rank) {
         const int fam = distant[rank].family;
         auto& entries = families[fam];
-        std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        std::ranges::stable_sort(entries, [](const Entry& a, const Entry& b) {
           if (a.chroma != b.chroma)
             return a.chroma > b.chroma;
           return a.count > b.count;
@@ -466,7 +456,7 @@ namespace noctalia::theme {
       }
       for (int fam : close) {
         auto& entries = families[fam];
-        std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        std::ranges::stable_sort(entries, [](const Entry& a, const Entry& b) {
           if (a.count != b.count)
             return a.count > b.count;
           return a.chroma > b.chroma;
@@ -476,9 +466,7 @@ namespace noctalia::theme {
           result.push_back({e.color, score});
         }
       }
-      std::stable_sort(result.begin(), result.end(), [](const Scored& a, const Scored& b) {
-        return a.score > b.score;
-      });
+      std::ranges::stable_sort(result, std::ranges::greater{}, &Scored::score);
       return result;
     }
 
@@ -488,7 +476,7 @@ namespace noctalia::theme {
       out.reserve(in.size());
       for (const auto& [color, count] : in)
         out.push_back({color, static_cast<double>(count)});
-      std::stable_sort(out.begin(), out.end(), [](const Scored& a, const Scored& b) { return a.score > b.score; });
+      std::ranges::stable_sort(out, std::ranges::greater{}, &Scored::score);
       return out;
     }
 
@@ -552,6 +540,7 @@ namespace noctalia::theme {
       }
 
       std::vector<Color> finalColors;
+      finalColors.reserve(scored.size());
       for (const auto& s : scored)
         finalColors.push_back(s.color);
 

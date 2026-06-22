@@ -133,6 +133,7 @@ namespace settings {
         .makeStringMapBlock = [&factory](
                                   Flex& section, const SettingEntry& entry, const StringMapSetting& map
                               ) { factory.makeStringMapBlock(section, entry, map); },
+        .supportsTaskbarWorkspaceGrouping = ctx.supportsTaskbarWorkspaceGrouping,
     };
   }
 
@@ -389,14 +390,14 @@ namespace settings {
       for (const auto& option : options) {
         auto item = ui::row({.align = FlexAlign::Center, .gap = Style::spaceXs * scale});
 
-        const bool isSelected = std::find(selected.begin(), selected.end(), option.value) != selected.end();
+        const bool isSelected = std::ranges::contains(selected, option.value);
         const std::string optionValue = option.value;
         auto checkbox = ui::checkbox({
             .checked = isSelected,
             .scale = scale,
             .onChange = [setOverride = ctx.setOverride, requestRebuild = ctx.requestRebuild, path, options, selected,
                          optionValue, requireAtLeastOne](bool checked) mutable {
-              auto it = std::find(selected.begin(), selected.end(), optionValue);
+              auto it = std::ranges::find(selected, optionValue);
               if (checked) {
                 if (it == selected.end()) {
                   selected.push_back(optionValue);
@@ -414,7 +415,7 @@ namespace settings {
               std::vector<std::string> ordered;
               ordered.reserve(selected.size());
               for (const auto& opt : options) {
-                if (std::find(selected.begin(), selected.end(), opt.value) != selected.end()) {
+                if (std::ranges::contains(selected, opt.value)) {
                   ordered.push_back(opt.value);
                 }
               }
@@ -454,7 +455,7 @@ namespace settings {
         std::vector<std::string> ordered;
         ordered.reserve(selected->size());
         for (const auto& opt : *options) {
-          if (std::find(selected->begin(), selected->end(), opt.value) != selected->end()) {
+          if (std::ranges::contains(*selected, opt.value)) {
             ordered.push_back(opt.value);
           }
         }
@@ -486,7 +487,7 @@ namespace settings {
           row = ui::row({.align = FlexAlign::Stretch, .gap = Style::spaceSm * scale, .fillWidth = true});
         }
 
-        const bool checked = std::find(selected->begin(), selected->end(), option.value) != selected->end();
+        const bool checked = std::ranges::contains(*selected, option.value);
         const std::string value = option.value;
         Button* card = nullptr;
         Label* titleLabel = nullptr;
@@ -501,8 +502,8 @@ namespace settings {
                       .bg = colorSpecFromRole(
                           active ? ColorRole::Primary : ColorRole::SurfaceVariant, active ? 1.0f : 0.45f
                       ),
-                      .border =
-                          colorSpecFromRole(active ? ColorRole::Primary : ColorRole::Outline, active ? 0.9f : 0.45f),
+                      .border = active ? colorSpecFromRole(ColorRole::Primary, 0.9f)
+                                       : colorSpecFromRole(ColorRole::Outline, Style::disabledOutlineAlpha),
                       .label = colorSpecFromRole(active ? ColorRole::OnPrimary : ColorRole::OnSurface),
                   },
               .hover =
@@ -520,7 +521,7 @@ namespace settings {
               .disabled =
                   Button::ButtonStateColors{
                       .bg = colorSpecFromRole(ColorRole::SurfaceVariant, 0.35f),
-                      .border = colorSpecFromRole(ColorRole::Outline, 0.35f),
+                      .border = colorSpecFromRole(ColorRole::Outline, Style::disabledOutlineAlpha),
                       .label = colorSpecFromRole(ColorRole::OnSurfaceVariant),
                   },
               .selected = std::nullopt,
@@ -774,9 +775,7 @@ namespace settings {
       listEditor->setItems(std::move(itemTypes));
       listEditor->setOnAddRequested([setOverride = ctx.setOverride, items = shortcuts.items,
                                      path = entry.path](std::string value) mutable {
-        if (value.empty() || std::any_of(items.begin(), items.end(), [&value](const ShortcutConfig& item) {
-              return item.type == value;
-            })) {
+        if (value.empty() || std::ranges::contains(items, value, &ShortcutConfig::type)) {
           return;
         }
         items.push_back(ShortcutConfig{std::move(value)});
@@ -926,8 +925,8 @@ namespace settings {
           .onClick = [state, commit]() {
             state->push_back(
                 SessionPanelActionConfig{
-                    "command", true, "notify-send 'Noctalia' 'Custom session entry'", std::nullopt, std::nullopt,
-                    SessionActionButtonVariant::Default, std::nullopt
+                    .action = "command",
+                    .command = "notify-send 'Noctalia' 'Custom session entry'",
                 }
             );
             commit();
@@ -1390,7 +1389,7 @@ namespace settings {
            .padding = (Style::spaceLg * 2.0f) * scale,
            .fill = colorSpecFromRole(ColorRole::SurfaceVariant, 0.24f),
            .radius = Style::scaledRadiusMd(scale),
-           .border = colorSpecFromRole(ColorRole::Outline, 0.28f),
+           .border = colorSpecFromRole(ColorRole::Outline),
            .minWidth = 360.0f * scale,
            .minHeight = 160.0f * scale,
            .fillWidth = true,

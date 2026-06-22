@@ -2,6 +2,7 @@
 
 #include "i18n/i18n.h"
 #include "render/core/renderer.h"
+#include "scripting/plugin_i18n.h"
 #include "scripting/plugin_registry.h"
 #include "shell/settings/font_family_catalog.h"
 #include "shell/settings/font_weight_catalog.h"
@@ -515,7 +516,7 @@ namespace settings {
       }
     }
 
-    std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+    std::ranges::sort(entries, [](const auto& a, const auto& b) {
       if (a.label == b.label) {
         return a.value < b.value;
       }
@@ -574,7 +575,8 @@ namespace settings {
     };
   }
 
-  std::vector<WidgetSettingSpec> widgetSettingSpecs(std::string_view type, std::string_view shellFontFamily) {
+  std::vector<WidgetSettingSpec>
+  widgetSettingSpecs(std::string_view type, std::string_view shellFontFamily, bool supportsTaskbarWorkspaceGrouping) {
     std::vector<WidgetSettingSpec> specs;
     auto commonSpecs = commonWidgetSettingSpecs(shellFontFamily);
 
@@ -755,8 +757,6 @@ namespace settings {
       add(intSpec("icon_spacing", 4, 0.0, 48.0, 1.0));
       add(colorSpec("active_color", "primary"));
       add(colorSpec("inactive_color", "outline"));
-      add(stringSpec("mic_filter_regex"));
-      add(stringSpec("cam_filter_regex"));
     } else if (type == "session") {
       add(glyphSpec("glyph", "shutdown"));
     } else if (type == "settings") {
@@ -789,88 +789,106 @@ namespace settings {
         add(std::move(minW));
       }
     } else if (type == "taskbar") {
-      add(boolSpec("group_by_workspace", false));
       add(boolSpec("show_all_outputs", false));
-      add(boolSpec("only_active_workspace", false));
-      {
-        auto showWsLabel = boolSpec("show_workspace_label", true);
-        showWsLabel.visibleWhen =
-            WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
-        add(std::move(showWsLabel));
-      }
-      {
-        auto labelPlacement = selectSpec("workspace_label_placement", "corner", workspaceLabelPlacement);
-        labelPlacement.visibleWhen =
-            WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
-        add(std::move(labelPlacement));
-      }
-      {
-        auto hideEmpty = boolSpec("hide_empty_workspaces", false);
-        hideEmpty.visibleWhen =
-            WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
-        add(std::move(hideEmpty));
-      }
-      {
-        auto groupCapsule = boolSpec("workspace_group_capsule", true);
-        groupCapsule.descriptionKey = "settings.widgets.settings.workspace-group-capsule.description";
-        groupCapsule.visibleWhen =
-            WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
-        add(std::move(groupCapsule));
-      }
-      {
-        auto singleIconPerApp = boolSpec("group_single_icon_per_app", false);
-        singleIconPerApp.visibleWhen =
-            WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
-        add(std::move(singleIconPerApp));
+      if (supportsTaskbarWorkspaceGrouping) {
+        add(boolSpec("group_by_workspace", false));
+        add(boolSpec("only_active_workspace", false));
+        {
+          auto showWsLabel = boolSpec("show_workspace_label", true);
+          showWsLabel.visibleWhen =
+              WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
+          add(std::move(showWsLabel));
+        }
+        {
+          auto labelPlacement = selectSpec("workspace_label_placement", "corner", workspaceLabelPlacement);
+          labelPlacement.visibleWhen =
+              WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
+          add(std::move(labelPlacement));
+        }
+        {
+          auto hideEmpty = boolSpec("hide_empty_workspaces", false);
+          hideEmpty.visibleWhen =
+              WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
+          add(std::move(hideEmpty));
+        }
+        {
+          auto groupCapsule = boolSpec("workspace_group_capsule", true);
+          groupCapsule.descriptionKey = "settings.widgets.settings.workspace-group-capsule.description";
+          groupCapsule.visibleWhen =
+              WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
+          add(std::move(groupCapsule));
+        }
+        {
+          auto singleIconPerApp = boolSpec("group_single_icon_per_app", false);
+          singleIconPerApp.visibleWhen =
+              WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
+          add(std::move(singleIconPerApp));
+        }
       }
       add(boolSpec("show_active_indicator", true));
       add(doubleSpec("active_opacity", 1.0, 0.1, 1.0, 0.01));
       add(doubleSpec("inactive_opacity", 1.0, 0.1, 1.0, 0.01));
-      const WidgetSettingVisibility groupedWorkspaceSettings{
-          WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}
-      };
-      {
-        auto focusedColor = colorSpec("focused_color", "primary");
-        focusedColor.visibleWhen = groupedWorkspaceSettings;
-        add(std::move(focusedColor));
-      }
-      {
-        auto occupiedColor = colorSpec("occupied_color", "secondary");
-        occupiedColor.visibleWhen = groupedWorkspaceSettings;
-        add(std::move(occupiedColor));
-      }
-      {
-        auto emptyColor = colorSpec("empty_color", "secondary");
-        emptyColor.visibleWhen = groupedWorkspaceSettings;
-        add(std::move(emptyColor));
-      }
-      for (auto& spec : commonSpecs) {
-        if (spec.schema.key == "capsule_radius") {
-          spec.descriptionKey = "settings.widgets.settings.capsule-radius.taskbar-description";
-          spec.visibleWhen = WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
-          break;
+      if (supportsTaskbarWorkspaceGrouping) {
+        const WidgetSettingVisibility groupedWorkspaceSettings{
+            WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}
+        };
+        {
+          auto focusedColor = colorSpec("focused_color", "primary");
+          focusedColor.visibleWhen = groupedWorkspaceSettings;
+          add(std::move(focusedColor));
         }
-      }
-      {
-        auto showWindowTitle = boolSpec("show_window_title", false);
-        showWindowTitle.visibleWhen =
-            WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"false"}}};
-        add(std::move(showWindowTitle));
-      }
-      const WidgetSettingVisibility windowTitleSettings = [] {
-        WidgetSettingVisibility v;
-        v.all = {{"group_by_workspace", {"false"}}, {"show_window_title", {"true"}}};
-        return v;
-      }();
-      {
-        auto windowTitleMaxWidth = doubleSpec("window_title_max_width", 100.0, 10.0, 200.0, 1.0);
-        windowTitleMaxWidth.visibleWhen = windowTitleSettings;
-        add(std::move(windowTitleMaxWidth));
-      }
-      {
-        auto taskbarMaxWidth = doubleSpec("taskbar_max_width", 8192.0, 10.0, 8192.0, 1.0);
-        taskbarMaxWidth.visibleWhen = windowTitleSettings;
-        add(std::move(taskbarMaxWidth));
+        {
+          auto occupiedColor = colorSpec("occupied_color", "secondary");
+          occupiedColor.visibleWhen = groupedWorkspaceSettings;
+          add(std::move(occupiedColor));
+        }
+        {
+          auto emptyColor = colorSpec("empty_color", "secondary");
+          emptyColor.visibleWhen = groupedWorkspaceSettings;
+          add(std::move(emptyColor));
+        }
+        for (auto& spec : commonSpecs) {
+          if (spec.schema.key == "capsule_radius") {
+            spec.descriptionKey = "settings.widgets.settings.capsule-radius.taskbar-description";
+            spec.visibleWhen =
+                WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"true"}}};
+            break;
+          }
+        }
+        {
+          auto showWindowTitle = boolSpec("show_window_title", false);
+          showWindowTitle.visibleWhen =
+              WidgetSettingVisibility{WidgetSettingVisibilityCondition{"group_by_workspace", {"false"}}};
+          add(std::move(showWindowTitle));
+        }
+        const WidgetSettingVisibility windowTitleSettings = [] {
+          WidgetSettingVisibility v;
+          v.all = {{"group_by_workspace", {"false"}}, {"show_window_title", {"true"}}};
+          return v;
+        }();
+        {
+          auto windowTitleMaxWidth = doubleSpec("window_title_max_width", 100.0, 10.0, 200.0, 1.0);
+          windowTitleMaxWidth.visibleWhen = windowTitleSettings;
+          add(std::move(windowTitleMaxWidth));
+        }
+        {
+          auto taskbarMaxWidth = doubleSpec("taskbar_max_width", 8192.0, 10.0, 8192.0, 1.0);
+          taskbarMaxWidth.visibleWhen = windowTitleSettings;
+          add(std::move(taskbarMaxWidth));
+        }
+      } else {
+        add(boolSpec("show_window_title", false));
+        const WidgetSettingVisibility windowTitleSettings{"show_window_title", {"true"}};
+        {
+          auto windowTitleMaxWidth = doubleSpec("window_title_max_width", 100.0, 10.0, 200.0, 1.0);
+          windowTitleMaxWidth.visibleWhen = windowTitleSettings;
+          add(std::move(windowTitleMaxWidth));
+        }
+        {
+          auto taskbarMaxWidth = doubleSpec("taskbar_max_width", 8192.0, 10.0, 8192.0, 1.0);
+          taskbarMaxWidth.visibleWhen = windowTitleSettings;
+          add(std::move(taskbarMaxWidth));
+        }
       }
     } else if (type == "tray") {
       add(stringListSpec("hidden"));
@@ -890,6 +908,7 @@ namespace settings {
       add(segmentedSpec("device", "output", volumeDeviceOptions));
       add(stepperIntSpec("scroll_step", 5, 1.0, 25.0, 1.0, "%"));
       add(boolSpec("show_label", true));
+      add(colorSpec("mute_color", "error"));
     } else if (type == "wallpaper") {
       add(glyphSpec("glyph", "wallpaper-selector"));
     } else if (type == "weather") {
@@ -933,6 +952,18 @@ namespace settings {
         add(std::move(pillScale));
       }
       {
+        auto activePillSize = doubleSpec("active_pill_size", 2.2, 0.25, 8.0, 0.05);
+        activePillSize.descriptionKey = "settings.widgets.settings.active-pill-size.workspaces-description";
+        activePillSize.visibleWhen = pillStyleOnly;
+        add(std::move(activePillSize));
+      }
+      {
+        auto inactivePillSize = doubleSpec("inactive_pill_size", 1.0, 0.25, 8.0, 0.05);
+        inactivePillSize.descriptionKey = "settings.widgets.settings.inactive-pill-size.workspaces-description";
+        inactivePillSize.visibleWhen = pillStyleOnly;
+        add(std::move(inactivePillSize));
+      }
+      {
         auto focusedColor = colorSpec("focused_color", "primary");
         add(std::move(focusedColor));
       }
@@ -950,14 +981,25 @@ namespace settings {
     return specs;
   }
 
-  std::vector<WidgetSettingSpec> manifestSettingSpecs(const std::vector<scripting::ManifestField>& fields) {
+  std::vector<WidgetSettingSpec> manifestSettingSpecs(
+      const std::vector<scripting::ManifestField>& fields, const scripting::PluginTranslationCatalog* translations
+  ) {
     std::vector<WidgetSettingSpec> specs;
     specs.reserve(fields.size());
     for (const auto& field : fields) {
       WidgetSettingSpec spec;
       spec.schema.key = field.key;
-      spec.literalLabel = field.label.empty() ? field.key : field.label;
-      spec.literalDescription = field.description;
+      if (!field.labelKey.empty()) {
+        spec.literalLabel = translations != nullptr ? translations->translate(field.labelKey) : field.labelKey;
+      } else {
+        spec.literalLabel = field.label.empty() ? field.key : field.label;
+      }
+      if (!field.descriptionKey.empty()) {
+        spec.literalDescription =
+            translations != nullptr ? translations->translate(field.descriptionKey) : field.descriptionKey;
+      } else {
+        spec.literalDescription = field.description;
+      }
       spec.advanced = field.advanced;
       spec.schema.minValue = field.minValue;
       spec.schema.maxValue = field.maxValue;
@@ -976,6 +1018,10 @@ namespace settings {
         spec.control = WidgetControlKind::Double;
         spec.schema.defaultValue = field.numberDefault;
         break;
+      case scripting::ManifestFieldType::StringList:
+        spec.control = WidgetControlKind::StringList;
+        spec.schema.defaultValue = field.stringListDefault;
+        break;
       case scripting::ManifestFieldType::File:
         spec.control = WidgetControlKind::File;
         spec.schema.defaultValue = field.stringDefault;
@@ -991,7 +1037,11 @@ namespace settings {
         spec.literalLabels = true;
         for (const auto& opt : field.options) {
           spec.schema.enumValues.push_back(opt.value);
-          spec.options.push_back(WidgetSettingSelectOption{.value = opt.value, .labelKey = opt.label});
+          std::string label = opt.label;
+          if (!opt.labelKey.empty()) {
+            label = translations != nullptr ? translations->translate(opt.labelKey) : opt.labelKey;
+          }
+          spec.options.push_back(WidgetSettingSelectOption{.value = opt.value, .labelKey = std::move(label)});
         }
         break;
       case scripting::ManifestFieldType::Color:
@@ -1018,18 +1068,22 @@ namespace settings {
     return specs;
   }
 
-  std::vector<WidgetSettingSpec>
-  widgetSettingSpecs(std::string_view type, const WidgetConfig* config, std::string_view shellFontFamily) {
+  std::vector<WidgetSettingSpec> widgetSettingSpecs(
+      std::string_view type, const WidgetConfig* config, std::string_view shellFontFamily,
+      bool supportsTaskbarWorkspaceGrouping
+  ) {
     (void)config;
     if (auto pw = resolvePluginWidget(type)) {
-      std::vector<WidgetSettingSpec> specs = manifestSettingSpecs(pw->entry->settings);
+      scripting::PluginTranslationCatalog translations;
+      translations.load(pw->sourcePath.parent_path());
+      std::vector<WidgetSettingSpec> specs = manifestSettingSpecs(pw->entry->settings, &translations);
       auto commonSpecs = commonWidgetSettingSpecs(shellFontFamily);
       specs.insert(
           specs.end(), std::make_move_iterator(commonSpecs.begin()), std::make_move_iterator(commonSpecs.end())
       );
       return specs;
     }
-    return widgetSettingSpecs(type, shellFontFamily);
+    return widgetSettingSpecs(type, shellFontFamily, supportsTaskbarWorkspaceGrouping);
   }
 
   namespace {

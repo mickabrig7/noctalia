@@ -9,6 +9,7 @@
 #include "ui/style.h"
 #include "util/string_utils.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -79,7 +80,7 @@ namespace {
     if (inner.size() < 2 || inner.size() > 3) {
       return false;
     }
-    if (!std::all_of(inner.begin(), inner.end(), [](char ch) { return isAsciiAlpha(ch); })) {
+    if (!std::ranges::all_of(inner, [](char ch) { return isAsciiAlpha(ch); })) {
       return false;
     }
     out.assign(inner);
@@ -531,7 +532,7 @@ void KeyboardLayoutWidget::cycleLayout() {
       && stateBefore->currentIndex >= 0
       && stateBefore->currentIndex < static_cast<int>(stateBefore->names.size())
       && stateBefore->names.size() > 1) {
-    std::size_t nextIndex = static_cast<std::size_t>(stateBefore->currentIndex + 1);
+    auto nextIndex = static_cast<std::size_t>(stateBefore->currentIndex + 1);
     if (nextIndex >= stateBefore->names.size()) {
       nextIndex = 0;
     }

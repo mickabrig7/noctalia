@@ -232,13 +232,15 @@ void WaylandToplevels::onHandleState(zwlr_foreign_toplevel_handle_v1* handle, wl
   }
 
   bool activated = false;
+  bool minimized = false;
   if (state != nullptr) {
     auto* value = static_cast<const std::uint32_t*>(state->data);
     const auto count = state->size / sizeof(std::uint32_t);
     for (std::size_t i = 0; i < count; ++i) {
       if (value[i] == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_ACTIVATED) {
         activated = true;
-        break;
+      } else if (value[i] == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MINIMIZED) {
+        minimized = true;
       }
     }
   }
@@ -254,6 +256,7 @@ void WaylandToplevels::onHandleState(zwlr_foreign_toplevel_handle_v1* handle, wl
   }
 
   it->second.activated = activated;
+  it->second.minimized = minimized;
   it->second.dirty = true;
   it->second.generation = ++m_generation;
 }
@@ -279,7 +282,7 @@ std::vector<std::string> WaylandToplevels::allAppIds(wl_output* outputFilter) co
     }
     ordered.push_back(&state);
   }
-  std::sort(ordered.begin(), ordered.end(), [](const ToplevelState* lhs, const ToplevelState* rhs) {
+  std::ranges::sort(ordered, [](const ToplevelState* lhs, const ToplevelState* rhs) {
     return lhs->order < rhs->order;
   });
 
@@ -324,6 +327,7 @@ std::vector<ToplevelInfo> WaylandToplevels::windowsForApp(
               .info = ToplevelInfo{
                   .title = state.title,
                   .appId = appId,
+                  .identifier = appId + ":" + state.title,
                   .order = state.order,
                   .handle = handle,
               },
@@ -331,9 +335,7 @@ std::vector<ToplevelInfo> WaylandToplevels::windowsForApp(
       );
     }
   }
-  std::sort(matched.begin(), matched.end(), [](const MatchedWindow& lhs, const MatchedWindow& rhs) {
-    return lhs.order < rhs.order;
-  });
+  std::ranges::sort(matched, {}, &MatchedWindow::order);
   out.reserve(matched.size());
   for (auto& window : matched) {
     out.push_back(std::move(window.info));

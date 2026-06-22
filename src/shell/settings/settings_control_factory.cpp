@@ -320,7 +320,16 @@ namespace settings {
                     selectedValue = setting.selectedValue, placeholder = setting.placeholder,
                     emptyText = setting.emptyText, path = std::move(path)]() {
           if (openPopup) {
-            openPopup(title, options, selectedValue, placeholder, emptyText, path);
+            openPopup(
+                SearchPickerOpenRequest{
+                    .title = title,
+                    .options = options,
+                    .selectedValue = selectedValue,
+                    .placeholder = placeholder,
+                    .emptyText = emptyText,
+                    .settingPath = path,
+                }
+            );
           }
         },
     });
@@ -809,7 +818,7 @@ namespace settings {
 
     std::unordered_set<std::string> suggestedSet(map.suggestedKeys.begin(), map.suggestedKeys.end());
     std::vector<std::string> suggested = map.suggestedKeys;
-    std::sort(suggested.begin(), suggested.end());
+    std::ranges::sort(suggested);
 
     std::vector<std::string> customKeys;
     for (const auto& [key, value] : map.entries) {
@@ -818,7 +827,7 @@ namespace settings {
         customKeys.push_back(key);
       }
     }
-    std::sort(customKeys.begin(), customKeys.end());
+    std::ranges::sort(customKeys);
 
     const auto addSuggestedRow = [&](const std::string& key) {
       const auto valueIt = map.entries.find(key);

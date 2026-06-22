@@ -1,4 +1,4 @@
-#include "shell/widgets_editor/background_widgets_editor.h"
+#include "shell/desktop/editor/desktop_widgets_editor.h"
 
 #include "config/config_service.h"
 #include "core/deferred_call.h"
@@ -47,7 +47,6 @@
 namespace {
 
   constexpr float kToolbarY = 68.0f;
-  constexpr float kDefaultDesktopAudioVisualizerAspectRatio = 240.0f / 96.0f;
   constexpr float kSelectionStroke = 2.0f;
   constexpr float kShadowExpand = 1.0f;
   const Color kShadowColor = rgba(0.0f, 0.0f, 0.0f, 0.45f);
@@ -69,7 +68,7 @@ namespace {
     if (cellSize <= 0) {
       return value;
     }
-    const float cell = static_cast<float>(cellSize);
+    const auto cell = static_cast<float>(cellSize);
     return origin + std::round((value - origin) / cell) * cell;
   }
 
@@ -183,7 +182,7 @@ namespace {
   }
 
   bool lockscreenWallpaperDiffersFromDesktop(
-      const BackgroundWidgetsEditorProfile& profile, ConfigService* config, std::string_view connectorName
+      const DesktopWidgetsEditorProfile& profile, ConfigService* config, std::string_view connectorName
   ) {
     if (!profile.showLockscreenLoginPreview || config == nullptr) {
       return false;
@@ -197,9 +196,9 @@ namespace {
 
 } // namespace
 
-BackgroundWidgetsEditor::BackgroundWidgetsEditor(BackgroundWidgetsEditorProfile profile) : m_profile(profile) {}
+DesktopWidgetsEditor::DesktopWidgetsEditor(DesktopWidgetsEditorProfile profile) : m_profile(profile) {}
 
-std::string BackgroundWidgetsEditor::nextWidgetId() const {
+std::string DesktopWidgetsEditor::nextWidgetId() const {
   std::uint64_t maxCounter = 0;
   for (const auto& widget : m_snapshot.widgets) {
     std::uint64_t counter = 0;
@@ -213,23 +212,19 @@ std::string BackgroundWidgetsEditor::nextWidgetId() const {
   return std::format("{}{:016x}", m_profile.widgetIdPrefix, nextCounter);
 }
 
-void BackgroundWidgetsEditor::initialize(
-    WaylandConnection& wayland, ConfigService* config, PipeWireSpectrum* pipewireSpectrum,
-    const WeatherService* weather, RenderContext* renderContext, MprisService* mpris, HttpClient* httpClient,
-    SystemMonitorService* sysmon, SharedTextureCache* textureCache, DesktopWidgetScriptDeps scriptDeps
-) {
-  m_wayland = &wayland;
-  m_config = config;
-  m_renderContext = renderContext;
-  m_textureCache = textureCache;
-  m_factory = std::make_unique<DesktopWidgetFactory>(pipewireSpectrum, weather, mpris, httpClient, sysmon, scriptDeps);
+void DesktopWidgetsEditor::initialize(const DesktopWidgetServices& services) {
+  m_wayland = &services.wayland;
+  m_config = services.config;
+  m_renderContext = services.renderContext;
+  m_textureCache = services.textureCache;
+  m_factory = std::make_unique<DesktopWidgetFactory>(services.runtime);
 }
 
-void BackgroundWidgetsEditor::setExitRequestedCallback(std::function<void()> callback) {
+void DesktopWidgetsEditor::setExitRequestedCallback(std::function<void()> callback) {
   m_exitRequestedCallback = std::move(callback);
 }
 
-void BackgroundWidgetsEditor::open(const WidgetsEditorSnapshot& snapshot) {
+void DesktopWidgetsEditor::open(const DesktopWidgetsEditorSnapshot& snapshot) {
   m_snapshot = snapshot;
   if (m_profile.showLockscreenLoginPreview && m_wayland != nullptr) {
     lockscreen_login_box::ensureWidgets(m_snapshot.widgets, *m_wayland);
@@ -253,7 +248,7 @@ void BackgroundWidgetsEditor::open(const WidgetsEditorSnapshot& snapshot) {
   requestLayout();
 }
 
-WidgetsEditorSnapshot BackgroundWidgetsEditor::close() {
+DesktopWidgetsEditorSnapshot DesktopWidgetsEditor::close() {
   if (m_drag.mode != DragMode::None) {
     finishDrag();
   }
@@ -278,12 +273,12 @@ WidgetsEditorSnapshot BackgroundWidgetsEditor::close() {
   return m_snapshot;
 }
 
-void BackgroundWidgetsEditor::clearSelection() {
+void DesktopWidgetsEditor::clearSelection() {
   m_selectedWidgetIds.clear();
   m_selectedWidgetId.clear();
 }
 
-void BackgroundWidgetsEditor::setSingleSelection(const std::string& id) {
+void DesktopWidgetsEditor::setSingleSelection(const std::string& id) {
   m_selectedWidgetIds.clear();
   if (!id.empty()) {
     m_selectedWidgetIds.insert(id);
@@ -291,9 +286,9 @@ void BackgroundWidgetsEditor::setSingleSelection(const std::string& id) {
   m_selectedWidgetId = id;
 }
 
-bool BackgroundWidgetsEditor::isWidgetSelected(const std::string& id) const { return m_selectedWidgetIds.contains(id); }
+bool DesktopWidgetsEditor::isWidgetSelected(const std::string& id) const { return m_selectedWidgetIds.contains(id); }
 
-void BackgroundWidgetsEditor::handleWidgetPress(const std::string& id) {
+void DesktopWidgetsEditor::handleWidgetPress(const std::string& id) {
   const bool ctrlHeld = m_ctrlHeld;
   const DesktopWidgetState* state = findWidgetState(id);
   const bool isLoginBox = state != nullptr && lockscreen_login_box::isLoginBoxWidget(*state);
@@ -331,14 +326,14 @@ void BackgroundWidgetsEditor::handleWidgetPress(const std::string& id) {
   startDrag(DragMode::Move, id, false);
 }
 
-bool BackgroundWidgetsEditor::isOpen() const noexcept { return m_open; }
+bool DesktopWidgetsEditor::isOpen() const noexcept { return m_open; }
 
-float BackgroundWidgetsEditor::widgetContentScale() const {
+float DesktopWidgetsEditor::widgetContentScale() const {
   const float baseUiScale = m_config != nullptr ? m_config->config().shell.uiScale : 1.0f;
   return desktop_widgets::widgetContentScale(baseUiScale);
 }
 
-void BackgroundWidgetsEditor::syncSurfaces() {
+void DesktopWidgetsEditor::syncSurfaces() {
   if (!m_open || m_wayland == nullptr || m_renderContext == nullptr) {
     return;
   }
@@ -355,16 +350,15 @@ void BackgroundWidgetsEditor::syncSurfaces() {
       continue;
     }
     const std::string key = desktop_widgets::outputKey(output);
-    const bool exists = std::any_of(m_surfaces.begin(), m_surfaces.end(), [&key](const auto& surface) {
-      return surface->outputName == key;
-    });
+    const bool exists =
+        std::ranges::any_of(m_surfaces, [&](const auto& surface) { return surface->outputName == key; });
     if (!exists) {
       createSurface(output);
     }
   }
 }
 
-void BackgroundWidgetsEditor::createSurface(const WaylandOutput& output) {
+void DesktopWidgetsEditor::createSurface(const WaylandOutput& output) {
   auto surfaceConfig = LayerSurfaceConfig{
       .nameSpace = std::string(m_profile.layerNamespace),
       .layer = LayerShellLayer::Bottom,
@@ -423,7 +417,7 @@ void BackgroundWidgetsEditor::createSurface(const WaylandOutput& output) {
 }
 
 std::optional<LayerPopupParentContext>
-BackgroundWidgetsEditor::overlayPopupParentContext(const OverlaySurface& surface) const {
+DesktopWidgetsEditor::overlayPopupParentContext(const OverlaySurface& surface) const {
   if (!m_open || surface.surface == nullptr) {
     return std::nullopt;
   }
@@ -444,8 +438,7 @@ BackgroundWidgetsEditor::overlayPopupParentContext(const OverlaySurface& surface
   };
 }
 
-std::optional<LayerPopupParentContext>
-BackgroundWidgetsEditor::popupParentContextForSurface(wl_surface* surface) const {
+std::optional<LayerPopupParentContext> DesktopWidgetsEditor::popupParentContextForSurface(wl_surface* surface) const {
   if (surface == nullptr) {
     return std::nullopt;
   }
@@ -453,7 +446,7 @@ BackgroundWidgetsEditor::popupParentContextForSurface(wl_surface* surface) const
   return overlay != nullptr ? overlayPopupParentContext(*overlay) : std::nullopt;
 }
 
-std::optional<LayerPopupParentContext> BackgroundWidgetsEditor::fallbackPopupParentContext() const {
+std::optional<LayerPopupParentContext> DesktopWidgetsEditor::fallbackPopupParentContext() const {
   if (!m_open || m_surfaces.empty()) {
     return std::nullopt;
   }
@@ -479,11 +472,11 @@ std::optional<LayerPopupParentContext> BackgroundWidgetsEditor::fallbackPopupPar
   return std::nullopt;
 }
 
-BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurface(wl_surface* surface) {
+DesktopWidgetsEditor::OverlaySurface* DesktopWidgetsEditor::findSurface(wl_surface* surface) {
   return const_cast<OverlaySurface*>(std::as_const(*this).findSurface(surface));
 }
 
-const BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurface(wl_surface* surface) const {
+const DesktopWidgetsEditor::OverlaySurface* DesktopWidgetsEditor::findSurface(wl_surface* surface) const {
   for (const auto& overlay : m_surfaces) {
     if (overlay->surface != nullptr && overlay->surface->wlSurface() == surface) {
       return overlay.get();
@@ -492,7 +485,7 @@ const BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurf
   return nullptr;
 }
 
-BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurface(const std::string& outputName) {
+DesktopWidgetsEditor::OverlaySurface* DesktopWidgetsEditor::findSurface(const std::string& outputName) {
   for (auto& overlay : m_surfaces) {
     if (overlay->outputName == outputName) {
       return overlay.get();
@@ -501,7 +494,7 @@ BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurface(co
   return nullptr;
 }
 
-BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurfaceForWidget(const std::string& widgetId) {
+DesktopWidgetsEditor::OverlaySurface* DesktopWidgetsEditor::findSurfaceForWidget(const std::string& widgetId) {
   for (auto& overlay : m_surfaces) {
     if (overlay->views.contains(widgetId)) {
       return overlay.get();
@@ -510,7 +503,7 @@ BackgroundWidgetsEditor::OverlaySurface* BackgroundWidgetsEditor::findSurfaceFor
   return nullptr;
 }
 
-BackgroundWidgetsEditor::EditorWidgetView* BackgroundWidgetsEditor::findView(const std::string& id) {
+DesktopWidgetsEditor::EditorWidgetView* DesktopWidgetsEditor::findView(const std::string& id) {
   for (auto& overlay : m_surfaces) {
     const auto it = overlay->views.find(id);
     if (it != overlay->views.end()) {
@@ -520,7 +513,7 @@ BackgroundWidgetsEditor::EditorWidgetView* BackgroundWidgetsEditor::findView(con
   return nullptr;
 }
 
-DesktopWidgetState* BackgroundWidgetsEditor::findWidgetState(const std::string& id) {
+DesktopWidgetState* DesktopWidgetsEditor::findWidgetState(const std::string& id) {
   for (auto& widget : m_snapshot.widgets) {
     if (widget.id == id) {
       return &widget;
@@ -529,7 +522,7 @@ DesktopWidgetState* BackgroundWidgetsEditor::findWidgetState(const std::string& 
   return nullptr;
 }
 
-const DesktopWidgetState* BackgroundWidgetsEditor::findWidgetState(const std::string& id) const {
+const DesktopWidgetState* DesktopWidgetsEditor::findWidgetState(const std::string& id) const {
   for (const auto& widget : m_snapshot.widgets) {
     if (widget.id == id) {
       return &widget;
@@ -538,7 +531,7 @@ const DesktopWidgetState* BackgroundWidgetsEditor::findWidgetState(const std::st
   return nullptr;
 }
 
-std::string BackgroundWidgetsEditor::effectiveOutputName(const DesktopWidgetState& state) const {
+std::string DesktopWidgetsEditor::effectiveOutputName(const DesktopWidgetState& state) const {
   if (m_wayland == nullptr) {
     return state.outputName;
   }
@@ -548,11 +541,11 @@ std::string BackgroundWidgetsEditor::effectiveOutputName(const DesktopWidgetStat
   return {};
 }
 
-bool BackgroundWidgetsEditor::shouldSnap() const {
+bool DesktopWidgetsEditor::shouldSnap() const {
   return (m_snapshot.grid.visible != m_shiftHeld) && m_snapshot.grid.cellSize > 0;
 }
 
-void BackgroundWidgetsEditor::prepareFrame(OverlaySurface& surface, bool needsUpdate, bool needsLayout) {
+void DesktopWidgetsEditor::prepareFrame(OverlaySurface& surface, bool needsUpdate, bool needsLayout) {
   if (m_renderContext == nullptr || surface.surface == nullptr) {
     return;
   }
@@ -607,7 +600,7 @@ void BackgroundWidgetsEditor::prepareFrame(OverlaySurface& surface, bool needsUp
   }
 }
 
-void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
+void DesktopWidgetsEditor::rebuildScene(OverlaySurface& surface) {
   surface.views.clear();
   surface.secondarySelections.clear();
   surface.selectionFrameTransform = nullptr;
@@ -677,7 +670,7 @@ void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
   if (m_snapshot.grid.visible && m_snapshot.grid.cellSize > 0) {
     const float width = root->width();
     const float height = root->height();
-    const float cell = static_cast<float>(m_snapshot.grid.cellSize);
+    const auto cell = static_cast<float>(m_snapshot.grid.cellSize);
     const std::int32_t majorInterval = std::max(1, m_snapshot.grid.majorInterval);
     const float centerX = width * 0.5f;
     const float centerY = height * 0.5f;
@@ -748,7 +741,9 @@ void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
     }
 
     widget->create();
-    if (widgetState.type == "audio_visualizer" || widgetState.type == "fancy_audio_visualizer") {
+    if (widgetState.type == "audio_visualizer"
+        || widgetState.type == "fancy_audio_visualizer"
+        || widgetState.type == "button") {
       widget->setEditorPreview(true);
     }
     widget->setAnimationManager(&surface.animations);
@@ -941,47 +936,45 @@ void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
     selectionBorderTransform->addChild(std::move(selectionBorder));
     root->addChild(std::move(selectionBorderTransform));
 
-    if (!selectedIsLoginBox) {
-      for (std::size_t i = 0; i < kScaleCornerCount; ++i) {
-        const ScaleCorner corner = static_cast<ScaleCorner>(i);
+    for (std::size_t i = 0; i < kScaleCornerCount; ++i) {
+      const auto corner = static_cast<ScaleCorner>(i);
 
-        auto scaleHandleShadow = ui::box({
-            .fill = clearColorSpec(),
-            .radius = Style::scaledRadiusSm() + kShadowExpand,
-            .configure = [](Box& box) { box.setBorder(kShadowColor, kShadowExpand); },
-        });
-        scaleHandleShadow->setZIndex(103);
-        surface.scaleHandleShadows[i] = scaleHandleShadow.get();
-        root->addChild(std::move(scaleHandleShadow));
+      auto scaleHandleShadow = ui::box({
+          .fill = clearColorSpec(),
+          .radius = Style::scaledRadiusSm() + kShadowExpand,
+          .configure = [](Box& box) { box.setBorder(kShadowColor, kShadowExpand); },
+      });
+      scaleHandleShadow->setZIndex(103);
+      surface.scaleHandleShadows[i] = scaleHandleShadow.get();
+      root->addChild(std::move(scaleHandleShadow));
 
-        auto scaleHandle = ui::box({
-            .fill = colorSpecFromRole(ColorRole::Primary),
-            .radius = Style::scaledRadiusSm(),
-        });
-        scaleHandle->setZIndex(104);
-        surface.scaleHandles[i] = scaleHandle.get();
-        root->addChild(std::move(scaleHandle));
+      auto scaleHandle = ui::box({
+          .fill = colorSpecFromRole(ColorRole::Primary),
+          .radius = Style::scaledRadiusSm(),
+      });
+      scaleHandle->setZIndex(104);
+      surface.scaleHandles[i] = scaleHandle.get();
+      root->addChild(std::move(scaleHandle));
 
-        auto scaleArea = std::make_unique<InputArea>();
-        scaleArea->setZIndex(105);
-        scaleArea->setOnPress([this, id = m_selectedWidgetId, corner](const InputArea::PointerData& data) {
-          if (data.button != BTN_LEFT) {
-            return;
-          }
-          if (data.pressed) {
-            startDrag(DragMode::Scale, id, false, corner);
-          } else if (m_drag.mode == DragMode::Scale && m_drag.widgetId == id) {
-            finishDrag();
-          }
-        });
-        scaleArea->setOnMotion([this, id = m_selectedWidgetId](const InputArea::PointerData& /*data*/) {
-          if (m_drag.mode == DragMode::Scale && m_drag.widgetId == id) {
-            updateDrag();
-          }
-        });
-        surface.scaleAreas[i] = scaleArea.get();
-        root->addChild(std::move(scaleArea));
-      }
+      auto scaleArea = std::make_unique<InputArea>();
+      scaleArea->setZIndex(105);
+      scaleArea->setOnPress([this, id = m_selectedWidgetId, corner](const InputArea::PointerData& data) {
+        if (data.button != BTN_LEFT) {
+          return;
+        }
+        if (data.pressed) {
+          startDrag(DragMode::Scale, id, false, corner);
+        } else if (m_drag.mode == DragMode::Scale && m_drag.widgetId == id) {
+          finishDrag();
+        }
+      });
+      scaleArea->setOnMotion([this, id = m_selectedWidgetId](const InputArea::PointerData& /*data*/) {
+        if (m_drag.mode == DragMode::Scale && m_drag.widgetId == id) {
+          updateDrag();
+        }
+      });
+      surface.scaleAreas[i] = scaleArea.get();
+      root->addChild(std::move(scaleArea));
     }
 
     updateSelectionVisuals(surface);
@@ -1010,10 +1003,7 @@ void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
   });
   auto* toolbarHandleAreaPtr = toolbarHandleArea.get();
 
-  const auto selectedWidgetIt =
-      std::find_if(m_snapshot.widgets.begin(), m_snapshot.widgets.end(), [this](const auto& widget) {
-        return widget.id == m_selectedWidgetId;
-      });
+  const auto selectedWidgetIt = std::ranges::find(m_snapshot.widgets, m_selectedWidgetId, &DesktopWidgetState::id);
   const bool hasSelectedWidget = selectedWidgetIt != m_snapshot.widgets.end();
   const bool selectedWidgetEnabled = hasSelectedWidget ? selectedWidgetIt->enabled : false;
   const bool canSendSelectedToBack =
@@ -1026,7 +1016,7 @@ void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
 
   const bool canCloneSelected = hasSelectedWidget
       && !selectedIsLoginBox
-      && std::any_of(m_selectedWidgetIds.begin(), m_selectedWidgetIds.end(), [this](const std::string& id) {
+      && std::ranges::any_of(m_selectedWidgetIds, [this](const std::string& id) {
                                   const DesktopWidgetState* state = findWidgetState(id);
                                   return state != nullptr && !lockscreen_login_box::isLoginBoxWidget(*state);
                                 });
@@ -1261,7 +1251,7 @@ void BackgroundWidgetsEditor::rebuildScene(OverlaySurface& surface) {
   surface.inputDispatcher.setSceneRoot(surface.sceneRoot.get());
 }
 
-void BackgroundWidgetsEditor::updateSelectionVisuals(OverlaySurface& surface) {
+void DesktopWidgetsEditor::updateSelectionVisuals(OverlaySurface& surface) {
   for (const SecondarySelectionVisual& secondary : surface.secondarySelections) {
     if (secondary.transform == nullptr || secondary.border == nullptr) {
       continue;
@@ -1299,12 +1289,12 @@ void BackgroundWidgetsEditor::updateSelectionVisuals(OverlaySurface& surface) {
     return;
   }
   const bool selectedIsLoginBox = lockscreen_login_box::isLoginBoxWidget(*state);
-  if (!selectedIsLoginBox) {
-    for (std::size_t i = 0; i < kScaleCornerCount; ++i) {
-      if (surface.scaleHandles[i] == nullptr || surface.scaleAreas[i] == nullptr) {
-        return;
-      }
+  for (std::size_t i = 0; i < kScaleCornerCount; ++i) {
+    if (surface.scaleHandles[i] == nullptr || surface.scaleAreas[i] == nullptr) {
+      return;
     }
+  }
+  if (!selectedIsLoginBox) {
     if (surface.rotationRing == nullptr || surface.rotateArea == nullptr) {
       return;
     }
@@ -1345,28 +1335,26 @@ void BackgroundWidgetsEditor::updateSelectionVisuals(OverlaySurface& surface) {
   surface.selectionBorder->setPosition(0.0f, 0.0f);
   surface.selectionBorder->setFrameSize(width, height);
 
-  if (!selectedIsLoginBox) {
-    for (std::size_t i = 0; i < kScaleCornerCount; ++i) {
-      const CornerSigns signs = cornerSigns(i);
-      const auto [cornerX, cornerY] =
-          rotatedCorner(state->cx, state->cy, width * 0.5f * signs.x, height * 0.5f * signs.y, state->rotationRad);
+  for (std::size_t i = 0; i < kScaleCornerCount; ++i) {
+    const CornerSigns signs = cornerSigns(i);
+    const auto [cornerX, cornerY] =
+        rotatedCorner(state->cx, state->cy, width * 0.5f * signs.x, height * 0.5f * signs.y, state->rotationRad);
 
-      const float shadowSize = kHandleSize + kShadowExpand * 2.0f;
-      if (surface.scaleHandleShadows[i] != nullptr) {
-        surface.scaleHandleShadows[i]->setPosition(cornerX - shadowSize * 0.5f, cornerY - shadowSize * 0.5f);
-        surface.scaleHandleShadows[i]->setFrameSize(shadowSize, shadowSize);
-      }
-
-      surface.scaleHandles[i]->setPosition(cornerX - kHandleSize * 0.5f, cornerY - kHandleSize * 0.5f);
-      surface.scaleHandles[i]->setFrameSize(kHandleSize, kHandleSize);
-
-      surface.scaleAreas[i]->setPosition(cornerX - kHandleSize, cornerY - kHandleSize);
-      surface.scaleAreas[i]->setFrameSize(kHandleSize * 1.5f, kHandleSize * 1.5f);
+    const float shadowSize = kHandleSize + kShadowExpand * 2.0f;
+    if (surface.scaleHandleShadows[i] != nullptr) {
+      surface.scaleHandleShadows[i]->setPosition(cornerX - shadowSize * 0.5f, cornerY - shadowSize * 0.5f);
+      surface.scaleHandleShadows[i]->setFrameSize(shadowSize, shadowSize);
     }
+
+    surface.scaleHandles[i]->setPosition(cornerX - kHandleSize * 0.5f, cornerY - kHandleSize * 0.5f);
+    surface.scaleHandles[i]->setFrameSize(kHandleSize, kHandleSize);
+
+    surface.scaleAreas[i]->setPosition(cornerX - kHandleSize, cornerY - kHandleSize);
+    surface.scaleAreas[i]->setFrameSize(kHandleSize * 1.5f, kHandleSize * 1.5f);
   }
 }
 
-void BackgroundWidgetsEditor::applyViewState(
+void DesktopWidgetsEditor::applyViewState(
     EditorWidgetView& view, const DesktopWidgetState& state, bool refreshContent
 ) {
   if (view.widget == nullptr || view.transformNode == nullptr || m_renderContext == nullptr) {
@@ -1402,7 +1390,7 @@ void BackgroundWidgetsEditor::applyViewState(
   view.transformNode->setOpacity(state.enabled ? 1.0f : kDisabledWidgetOpacity);
 }
 
-void BackgroundWidgetsEditor::updateViewTransforms(const std::string* relayoutWidgetId) {
+void DesktopWidgetsEditor::updateViewTransforms(const std::string* relayoutWidgetId) {
   for (auto& surface : m_surfaces) {
     for (auto& [id, view] : surface->views) {
       const DesktopWidgetState* state = findWidgetState(id);
@@ -1415,7 +1403,7 @@ void BackgroundWidgetsEditor::updateViewTransforms(const std::string* relayoutWi
   }
 }
 
-void BackgroundWidgetsEditor::addWidget(const std::string& outputName, const std::string& type) {
+void DesktopWidgetsEditor::addWidget(const std::string& outputName, const std::string& type) {
   if (!m_open || m_wayland == nullptr) {
     return;
   }
@@ -1443,12 +1431,20 @@ void BackgroundWidgetsEditor::addWidget(const std::string& outputName, const std
   widget.boxHeight = 0.0f;
   widget.rotationRad = 0.0f;
   if (widget.type == "audio_visualizer") {
-    widget.settings.emplace("aspect_ratio", static_cast<double>(kDefaultDesktopAudioVisualizerAspectRatio));
     widget.settings.emplace("bands", static_cast<std::int64_t>(32));
     widget.settings.emplace("show_when_idle", true);
   }
   if (widget.type == "fancy_audio_visualizer") {
     widget.settings.emplace("background", false);
+  }
+  if (widget.type == "button") {
+    widget.settings.emplace("background", true);
+    widget.settings.emplace("glyph", std::string("heart"));
+    widget.settings.emplace("variant", std::string("default"));
+  }
+  if (widget.type == "sysmon") {
+    widget.settings.emplace("stat", std::string("cpu_usage"));
+    widget.settings.emplace("stat2", std::string("cpu_temp"));
   }
 
   if (widget.type == "sticker") {
@@ -1493,7 +1489,7 @@ void BackgroundWidgetsEditor::addWidget(const std::string& outputName, const std
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::removeSelectedWidget() {
+void DesktopWidgetsEditor::removeSelectedWidget() {
   if (m_selectedWidgetIds.empty()) {
     return;
   }
@@ -1507,7 +1503,7 @@ void BackgroundWidgetsEditor::removeSelectedWidget() {
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::toggleSelectedWidgetEnabled() {
+void DesktopWidgetsEditor::toggleSelectedWidgetEnabled() {
   if (m_selectedWidgetId.empty()) {
     return;
   }
@@ -1519,7 +1515,7 @@ void BackgroundWidgetsEditor::toggleSelectedWidgetEnabled() {
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::sendSelectedWidgetToBack() {
+void DesktopWidgetsEditor::sendSelectedWidgetToBack() {
   if (m_selectedWidgetId.empty()) {
     return;
   }
@@ -1528,9 +1524,7 @@ void BackgroundWidgetsEditor::sendSelectedWidgetToBack() {
     return;
   }
 
-  auto it = std::find_if(m_snapshot.widgets.begin(), m_snapshot.widgets.end(), [this](const auto& widget) {
-    return widget.id == m_selectedWidgetId;
-  });
+  auto it = std::ranges::find(m_snapshot.widgets, m_selectedWidgetId, &DesktopWidgetState::id);
   if (it == m_snapshot.widgets.end() || it == m_snapshot.widgets.begin()) {
     return;
   }
@@ -1539,7 +1533,7 @@ void BackgroundWidgetsEditor::sendSelectedWidgetToBack() {
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::bringSelectedWidgetToFront() {
+void DesktopWidgetsEditor::bringSelectedWidgetToFront() {
   if (m_selectedWidgetId.empty()) {
     return;
   }
@@ -1548,9 +1542,7 @@ void BackgroundWidgetsEditor::bringSelectedWidgetToFront() {
     return;
   }
 
-  auto it = std::find_if(m_snapshot.widgets.begin(), m_snapshot.widgets.end(), [this](const auto& widget) {
-    return widget.id == m_selectedWidgetId;
-  });
+  auto it = std::ranges::find(m_snapshot.widgets, m_selectedWidgetId, &DesktopWidgetState::id);
   if (it == m_snapshot.widgets.end() || std::next(it) == m_snapshot.widgets.end()) {
     return;
   }
@@ -1559,7 +1551,7 @@ void BackgroundWidgetsEditor::bringSelectedWidgetToFront() {
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::flipSelectedWidgetHorizontal() {
+void DesktopWidgetsEditor::flipSelectedWidgetHorizontal() {
   if (m_selectedWidgetIds.empty()) {
     return;
   }
@@ -1574,7 +1566,7 @@ void BackgroundWidgetsEditor::flipSelectedWidgetHorizontal() {
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::flipSelectedWidgetVertical() {
+void DesktopWidgetsEditor::flipSelectedWidgetVertical() {
   if (m_selectedWidgetIds.empty()) {
     return;
   }
@@ -1589,14 +1581,14 @@ void BackgroundWidgetsEditor::flipSelectedWidgetVertical() {
   requestLayout();
 }
 
-float BackgroundWidgetsEditor::duplicateOffset() const {
+float DesktopWidgetsEditor::duplicateOffset() const {
   if (shouldSnap() && m_snapshot.grid.cellSize > 0) {
     return static_cast<float>(m_snapshot.grid.cellSize);
   }
   return 24.0f;
 }
 
-std::vector<DesktopWidgetState> BackgroundWidgetsEditor::selectedWidgetTemplates() const {
+std::vector<DesktopWidgetState> DesktopWidgetsEditor::selectedWidgetTemplates() const {
   std::vector<DesktopWidgetState> templates;
   for (const auto& widget : m_snapshot.widgets) {
     if (!m_selectedWidgetIds.contains(widget.id) || lockscreen_login_box::isLoginBoxWidget(widget)) {
@@ -1607,7 +1599,7 @@ std::vector<DesktopWidgetState> BackgroundWidgetsEditor::selectedWidgetTemplates
   return templates;
 }
 
-std::vector<std::string> BackgroundWidgetsEditor::insertWidgetCopies(
+std::vector<std::string> DesktopWidgetsEditor::insertWidgetCopies(
     const std::vector<DesktopWidgetState>& templates, float offsetX, float offsetY, bool selectInserted
 ) {
   if (templates.empty() || m_wayland == nullptr) {
@@ -1650,7 +1642,7 @@ std::vector<std::string> BackgroundWidgetsEditor::insertWidgetCopies(
   return insertedIds;
 }
 
-void BackgroundWidgetsEditor::cloneSelectedWidgets() {
+void DesktopWidgetsEditor::cloneSelectedWidgets() {
   const std::vector<DesktopWidgetState> templates = selectedWidgetTemplates();
   if (templates.empty()) {
     return;
@@ -1659,12 +1651,12 @@ void BackgroundWidgetsEditor::cloneSelectedWidgets() {
   insertWidgetCopies(templates, step, step, true);
 }
 
-void BackgroundWidgetsEditor::copySelectedWidgets() {
+void DesktopWidgetsEditor::copySelectedWidgets() {
   m_widgetClipboard = selectedWidgetTemplates();
   m_pasteCount = 0;
 }
 
-void BackgroundWidgetsEditor::pasteWidgets() {
+void DesktopWidgetsEditor::pasteWidgets() {
   if (m_widgetClipboard.empty()) {
     return;
   }
@@ -1674,7 +1666,7 @@ void BackgroundWidgetsEditor::pasteWidgets() {
   insertWidgetCopies(m_widgetClipboard, offset, offset, true);
 }
 
-void BackgroundWidgetsEditor::startToolbarDrag(const std::string& outputName) {
+void DesktopWidgetsEditor::startToolbarDrag(const std::string& outputName) {
   OverlaySurface* surface = findSurface(outputName);
   if (surface == nullptr || surface->toolbar == nullptr) {
     return;
@@ -1689,7 +1681,7 @@ void BackgroundWidgetsEditor::startToolbarDrag(const std::string& outputName) {
   m_drag.initialToolbarY = surface->toolbarY;
 }
 
-void BackgroundWidgetsEditor::clampToolbarPosition(OverlaySurface& surface, float toolbarWidth, float toolbarHeight) {
+void DesktopWidgetsEditor::clampToolbarPosition(OverlaySurface& surface, float toolbarWidth, float toolbarHeight) {
   if (surface.surface == nullptr) {
     return;
   }
@@ -1700,7 +1692,7 @@ void BackgroundWidgetsEditor::clampToolbarPosition(OverlaySurface& surface, floa
   surface.toolbarY = std::clamp(surface.toolbarY, 0.0f, maxY);
 }
 
-void BackgroundWidgetsEditor::startInspectorDrag(const std::string& outputName) {
+void DesktopWidgetsEditor::startInspectorDrag(const std::string& outputName) {
   OverlaySurface* surface = findSurface(outputName);
   if (surface == nullptr || surface->inspector == nullptr) {
     return;
@@ -1715,7 +1707,7 @@ void BackgroundWidgetsEditor::startInspectorDrag(const std::string& outputName) 
   m_drag.initialInspectorY = surface->inspectorY;
 }
 
-void BackgroundWidgetsEditor::clampInspectorPosition(
+void DesktopWidgetsEditor::clampInspectorPosition(
     OverlaySurface& surface, float inspectorWidth, float inspectorHeight
 ) {
   if (surface.surface == nullptr) {
@@ -1728,9 +1720,9 @@ void BackgroundWidgetsEditor::clampInspectorPosition(
   surface.inspectorY = std::clamp(surface.inspectorY, 0.0f, maxY);
 }
 
-// buildInspector and applySettingChange are in background_widgets_editor_settings.cpp
+// buildInspector and applySettingChange are in desktop_widgets_editor_settings.cpp
 
-void BackgroundWidgetsEditor::deferEditorMutation(std::function<void()> action) {
+void DesktopWidgetsEditor::deferEditorMutation(std::function<void()> action) {
   DeferredCall::callLater([this, action = std::move(action)]() mutable {
     if (m_open) {
       action();
@@ -1738,7 +1730,7 @@ void BackgroundWidgetsEditor::deferEditorMutation(std::function<void()> action) 
   });
 }
 
-void BackgroundWidgetsEditor::requestExit() {
+void DesktopWidgetsEditor::requestExit() {
   if (!m_exitRequestedCallback) {
     return;
   }
@@ -1749,14 +1741,14 @@ void BackgroundWidgetsEditor::requestExit() {
   });
 }
 
-void BackgroundWidgetsEditor::startDrag(
+void DesktopWidgetsEditor::startDrag(
     DragMode mode, const std::string& widgetId, bool rebuildOnFinish, ScaleCorner scaleCorner
 ) {
   DesktopWidgetState* state = findWidgetState(widgetId);
   if (state == nullptr) {
     return;
   }
-  if (lockscreen_login_box::isLoginBoxWidget(*state) && mode != DragMode::Move) {
+  if (lockscreen_login_box::isLoginBoxWidget(*state) && mode != DragMode::Move && mode != DragMode::Scale) {
     return;
   }
 
@@ -1806,7 +1798,7 @@ void BackgroundWidgetsEditor::startDrag(
   }
 }
 
-void BackgroundWidgetsEditor::updateDrag() {
+void DesktopWidgetsEditor::updateDrag() {
   if (m_drag.mode == DragMode::None) {
     return;
   }
@@ -1968,6 +1960,15 @@ void BackgroundWidgetsEditor::updateDrag() {
       boxH = std::max(cell, std::round(boxH / cell) * cell);
     }
 
+    if (lockscreen_login_box::isLoginBoxWidget(*state)) {
+      float screenWidth = 1920.0f;
+      if (OverlaySurface* surface = findSurfaceForWidget(m_drag.widgetId);
+          surface != nullptr && surface->surface != nullptr) {
+        screenWidth = static_cast<float>(surface->surface->width());
+      }
+      lockscreen_login_box::clampPanelSize(screenWidth, boxW, boxH);
+    }
+
     if (!m_altHeld) {
       const float centerLocalX = signs.x * boxW * 0.5f;
       const float centerLocalY = signs.y * boxH * 0.5f;
@@ -2010,7 +2011,7 @@ void BackgroundWidgetsEditor::updateDrag() {
   }
 }
 
-void BackgroundWidgetsEditor::finishDrag() {
+void DesktopWidgetsEditor::finishDrag() {
   const DragMode mode = m_drag.mode;
   const std::string widgetId = m_drag.widgetId;
   const bool rebuildOnFinish = m_drag.rebuildOnFinish;
@@ -2039,7 +2040,7 @@ void BackgroundWidgetsEditor::finishDrag() {
   }
 }
 
-bool BackgroundWidgetsEditor::onPointerEvent(const PointerEvent& event) {
+bool DesktopWidgetsEditor::onPointerEvent(const PointerEvent& event) {
   if (!m_open) {
     return false;
   }
@@ -2110,7 +2111,7 @@ bool BackgroundWidgetsEditor::onPointerEvent(const PointerEvent& event) {
   return true;
 }
 
-void BackgroundWidgetsEditor::onKeyboardEvent(const KeyboardEvent& event) {
+void DesktopWidgetsEditor::onKeyboardEvent(const KeyboardEvent& event) {
   if (!m_open) {
     return;
   }
@@ -2220,7 +2221,7 @@ void BackgroundWidgetsEditor::onKeyboardEvent(const KeyboardEvent& event) {
   }
 }
 
-void BackgroundWidgetsEditor::onOutputChange() {
+void DesktopWidgetsEditor::onOutputChange() {
   if (!m_open) {
     return;
   }
@@ -2228,7 +2229,7 @@ void BackgroundWidgetsEditor::onOutputChange() {
   requestLayout();
 }
 
-void BackgroundWidgetsEditor::onSecondTick() {
+void DesktopWidgetsEditor::onSecondTick() {
   if (!m_open || m_drag.mode != DragMode::None) {
     return;
   }
@@ -2249,7 +2250,7 @@ void BackgroundWidgetsEditor::onSecondTick() {
   }
 }
 
-void BackgroundWidgetsEditor::releaseWallpaperPreview(OverlaySurface& surface) {
+void DesktopWidgetsEditor::releaseWallpaperPreview(OverlaySurface& surface) {
   if (surface.wallpaperPreviewTexture.id == 0) {
     surface.wallpaperPreviewLoadedPath.clear();
     return;
@@ -2268,7 +2269,7 @@ void BackgroundWidgetsEditor::releaseWallpaperPreview(OverlaySurface& surface) {
   surface.wallpaperPreviewLoadedPath.clear();
 }
 
-void BackgroundWidgetsEditor::updateWallpaperPreview(OverlaySurface& surface) {
+void DesktopWidgetsEditor::updateWallpaperPreview(OverlaySurface& surface) {
   if (!surface.wallpaperPreviewActive
       || surface.wallpaperPreview == nullptr
       || m_config == nullptr
@@ -2277,8 +2278,8 @@ void BackgroundWidgetsEditor::updateWallpaperPreview(OverlaySurface& surface) {
     return;
   }
 
-  const float width = static_cast<float>(surface.surface->width());
-  const float height = static_cast<float>(surface.surface->height());
+  const auto width = static_cast<float>(surface.surface->width());
+  const auto height = static_cast<float>(surface.surface->height());
   surface.wallpaperPreview->setPosition(0.0f, 0.0f);
   surface.wallpaperPreview->setSize(width, height);
 
@@ -2330,7 +2331,7 @@ void BackgroundWidgetsEditor::updateWallpaperPreview(OverlaySurface& surface) {
   surface.wallpaperPreview->setTransition(WallpaperTransition::Fade, 0.0f, TransitionParams{});
 }
 
-void BackgroundWidgetsEditor::requestLayout() {
+void DesktopWidgetsEditor::requestLayout() {
   for (auto& surface : m_surfaces) {
     if (surface->surface != nullptr) {
       surface->sceneRebuildRequested = true;
@@ -2339,7 +2340,7 @@ void BackgroundWidgetsEditor::requestLayout() {
   }
 }
 
-void BackgroundWidgetsEditor::requestRedraw() {
+void DesktopWidgetsEditor::requestRedraw() {
   for (auto& surface : m_surfaces) {
     if (surface->surface != nullptr) {
       surface->surface->requestRedraw();

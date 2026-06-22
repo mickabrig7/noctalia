@@ -19,6 +19,7 @@ class Input;
 class InputArea;
 class Label;
 class LauncherResultAdapter;
+class LauncherAppGridAdapter;
 class Node;
 class Renderer;
 class Segmented;
@@ -54,6 +55,11 @@ public:
 private:
   enum ActiveCategoryType { All, RecentlyUsed, Category };
 
+  struct CategoryFilterSlot {
+    ActiveCategoryType type;
+    std::size_t categoryIndex = 0;
+  };
+
   void onPanelCardOpacityChanged(float opacity) override;
   void doLayout(Renderer& renderer, float width, float height) override;
   void onInputChanged(const std::string& text);
@@ -70,8 +76,11 @@ private:
   void openAppActionsMenu(std::size_t index, float anchorX, float anchorY);
   void rebuildCategoryFilter(const std::vector<LauncherCategory>& categories);
   void setCategoryFilterVisible(bool visible);
+  void setActiveCategorySlot(std::size_t slotIndex);
   void applyActiveCategory();
   void syncLauncherListStyle();
+  void syncLauncherViewLayout(Renderer* renderer = nullptr);
+  [[nodiscard]] bool shouldUseAppGrid() const;
   void refreshLauncherAppIconColorization();
   void updateLauncherGridMetrics(Renderer& renderer);
 
@@ -87,17 +96,21 @@ private:
   Flex* m_body = nullptr;
   VirtualGridView* m_grid = nullptr;
   Label* m_emptyLabel = nullptr;
-  std::unique_ptr<LauncherResultAdapter> m_adapter;
+  std::unique_ptr<LauncherResultAdapter> m_listAdapter;
+  std::unique_ptr<LauncherAppGridAdapter> m_gridAdapter;
 
   std::string m_query;
   ActiveCategoryType m_activeCategoryType = All;
   std::string m_activeCategory;
   std::vector<LauncherCategory> m_currentCategories;
+  std::vector<CategoryFilterSlot> m_categoryFilterSlots;
   bool m_hasRecentlyUsed = false;
   std::size_t m_selectedIndex = 0;
   bool m_categoryFilterVisible = true;
   bool m_launcherShowIcons = true;
   bool m_launcherCompact = false;
+  bool m_launcherAppGrid = false;
+  bool m_usingAppGrid = false;
   float m_launcherRowHeight = 0.0f;
   ConfigService* m_config = nullptr;
   AsyncTextureCache* m_asyncTextures = nullptr;

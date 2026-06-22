@@ -1,4 +1,5 @@
 #include "config/atomic_file.h"
+#include "config/config_merge.h"
 #include "config/config_service.h"
 #include "config/widget_config.h"
 #include "core/key_chord.h"
@@ -203,6 +204,9 @@ namespace {
     if (ovr.marginEdge) {
       resolved.marginEdge = *ovr.marginEdge;
     }
+    if (ovr.marginOppositeEdge) {
+      resolved.marginOppositeEdge = *ovr.marginOppositeEdge;
+    }
     if (ovr.padding) {
       resolved.padding = *ovr.padding;
     }
@@ -266,6 +270,21 @@ namespace {
     }
     if (ovr.widgetCapsuleOpacity) {
       resolved.widgetCapsuleOpacity = std::clamp(static_cast<float>(*ovr.widgetCapsuleOpacity), 0.0f, 1.0f);
+    }
+    if (ovr.deadZone.command) {
+      resolved.deadZone.command = *ovr.deadZone.command;
+    }
+    if (ovr.deadZone.rightCommand) {
+      resolved.deadZone.rightCommand = *ovr.deadZone.rightCommand;
+    }
+    if (ovr.deadZone.middleCommand) {
+      resolved.deadZone.middleCommand = *ovr.deadZone.middleCommand;
+    }
+    if (ovr.deadZone.scrollUpCommand) {
+      resolved.deadZone.scrollUpCommand = *ovr.deadZone.scrollUpCommand;
+    }
+    if (ovr.deadZone.scrollDownCommand) {
+      resolved.deadZone.scrollDownCommand = *ovr.deadZone.scrollDownCommand;
     }
     return resolved;
   }
@@ -522,6 +541,7 @@ namespace {
               row.insert_or_assign("show_toast", item.showToast);
               row.insert_or_assign("save_history", item.saveHistory);
               row.insert_or_assign("play_sound", item.playSound);
+              row.insert_or_assign("allow_permanent", item.allowPermanent);
               if (!item.allowedUrgencies.empty()) {
                 toml::array urgencies;
                 for (const auto& urgency : item.allowedUrgencies) {
@@ -648,24 +668,6 @@ namespace {
     return key == "start" || key == "center" || key == "end";
   }
 
-  std::vector<std::filesystem::path> sortedConfigTomlFiles(std::string_view configDir) {
-    std::vector<std::filesystem::path> files;
-    if (configDir.empty()) {
-      return files;
-    }
-
-    std::error_code ec;
-    if (!std::filesystem::is_directory(configDir, ec) || ec) {
-      return files;
-    }
-    for (const auto& entry : std::filesystem::directory_iterator(configDir, ec)) {
-      if (entry.is_regular_file() && entry.path().extension() == ".toml") {
-        files.push_back(entry.path());
-      }
-    }
-    std::sort(files.begin(), files.end());
-    return files;
-  }
 } // namespace
 
 ConfigChangeSet computeConfigChangeSet(const Config& prev, const Config& next) {
@@ -708,7 +710,7 @@ void ConfigService::setPluginEnabled(std::string_view pluginId, bool enabled) {
 
   const std::string id(pluginId);
   std::vector<std::string> next = m_config.plugins.enabled;
-  const bool currentlyEnabled = std::find(next.begin(), next.end(), id) != next.end();
+  const bool currentlyEnabled = std::ranges::contains(next, id);
 
   if (enabled) {
     if (currentlyEnabled) {
@@ -1063,21 +1065,14 @@ std::optional<Config> ConfigService::configForOverrides(const toml::table& overr
   Config parsed;
   noctalia::config::seedBuiltinWidgets(parsed);
 
-  const auto files = sortedConfigTomlFiles(m_configDir);
-  toml::table merged;
-  for (const auto& path : files) {
-    try {
-      auto tbl = toml::parse_file(path.string());
-      deepMerge(merged, tbl);
-    } catch (const toml::parse_error& e) {
-      kLog.warn(
-          "skipping parse error in effective override comparison {}: {}", path.filename().string(), e.description()
-      );
-    }
+  auto mergeResult = noctalia::config::mergeConfigWithIncludes(m_configDir);
+  toml::table merged = std::move(mergeResult.merged);
+  if (!mergeResult.firstError.empty()) {
+    kLog.warn("skipping config error in effective override comparison: {}", mergeResult.firstError);
   }
 
   deepMerge(merged, overrides);
-  if (files.empty() && overrides.empty()) {
+  if (mergeResult.loadedFiles.empty() && overrides.empty()) {
     parsed.idle.behaviors = defaultIdleBehaviors();
     parsed.bars.push_back(BarConfig{});
     parsed.controlCenter.shortcuts = defaultControlCenterShortcuts();
@@ -1167,9 +1162,7 @@ bool ConfigService::canMoveBarOverride(std::string_view name, int direction) con
     return false;
   }
 
-  const auto barIt = std::find_if(m_config.bars.begin(), m_config.bars.end(), [name](const BarConfig& bar) {
-    return bar.name == name;
-  });
+  const auto barIt = std::ranges::find(m_config.bars, name, &BarConfig::name);
   if (barIt == m_config.bars.end()) {
     return false;
   }
@@ -1253,7 +1246,7 @@ bool ConfigService::moveBarOverride(std::string_view name, int direction) {
   }
 
   auto order = barOrderNames(m_config.bars);
-  const auto currentIt = std::find(order.begin(), order.end(), std::string(name));
+  const auto currentIt = std::ranges::find(order, name);
   if (currentIt == order.end()) {
     return false;
   }
@@ -1321,9 +1314,7 @@ bool ConfigService::createMonitorOverride(std::string_view barName, std::string_
     return false;
   }
 
-  const auto barIt = std::find_if(m_config.bars.begin(), m_config.bars.end(), [barName](const BarConfig& bar) {
-    return bar.name == barName;
-  });
+  const auto barIt = std::ranges::find(m_config.bars, barName, &BarConfig::name);
   if (barIt == m_config.bars.end()) {
     return false;
   }
@@ -1373,9 +1364,7 @@ bool ConfigService::renameMonitorOverride(
     return false;
   }
 
-  const auto barIt = std::find_if(m_config.bars.begin(), m_config.bars.end(), [barName](const BarConfig& bar) {
-    return bar.name == barName;
-  });
+  const auto barIt = std::ranges::find(m_config.bars, barName, &BarConfig::name);
   if (barIt == m_config.bars.end()) {
     return false;
   }
@@ -1584,7 +1573,7 @@ std::string ConfigService::getGreeterSyncWallpaperPath() const {
       connectors.push_back(connector);
     }
   }
-  std::sort(connectors.begin(), connectors.end());
+  std::ranges::sort(connectors);
   for (const std::string& connector : connectors) {
     return m_monitorWallpaperPaths.at(connector);
   }
@@ -1703,7 +1692,7 @@ void ConfigService::extractWallpaperFromTable(const toml::table& table) {
       }
       if (auto sourceKey = (*favTbl)["palette_source"].value<std::string>()) {
         if (auto parsed = enumFromKey(kPaletteSources, *sourceKey)) {
-          favorite.paletteSource = *parsed;
+          favorite.paletteSource = parsed;
         }
       }
       if (auto v = (*favTbl)["builtin_palette"].value<std::string>()) {

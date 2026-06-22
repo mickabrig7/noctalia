@@ -62,6 +62,7 @@ public:
   void setOpenSettingsWindowCallback(std::function<void()> callback);
   void setCloseSettingsWindowCallback(std::function<void()> callback);
   void setToggleSettingsWindowCallback(std::function<void()> callback);
+  void setCloseDesktopWidgetsEditorCallback(std::function<void()> callback);
   void openSettingsWindow();
   void closeSettingsWindow();
   void toggleSettingsWindow();
@@ -79,6 +80,8 @@ public:
   void setPanelOpenedCallback(std::function<void()> callback);
   void setAttachedPanelAvailabilityCallback(std::function<bool(wl_output*, std::string_view)> callback);
   void setAttachedPanelBarSettledCallback(std::function<bool(wl_output*, std::string_view)> callback);
+  // Called when an auto-hide bar finishes revealing for an attached panel open.
+  void onAttachedBarRevealSettled(wl_output* output, std::string_view barName);
 
   void registerPanel(const std::string& id, std::unique_ptr<Panel> content);
 
@@ -169,6 +172,7 @@ private:
   std::function<void()> m_openSettingsWindow;
   std::function<void()> m_closeSettingsWindow;
   std::function<void()> m_toggleSettingsWindow;
+  std::function<void()> m_closeDesktopWidgetsEditor;
   std::function<void(wl_output*, std::string_view, std::optional<AttachedPanelGeometry>)>
       m_attachedPanelGeometryCallback;
   std::function<std::vector<InputRect>(wl_output*)> m_clickShieldExcludeRectsProvider;

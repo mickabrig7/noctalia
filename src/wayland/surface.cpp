@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <format>
+#include <ranges>
 #include <string_view>
 #include <typeinfo>
 #include <unordered_map>
@@ -223,19 +224,6 @@ Surface::~Surface() {
 }
 
 bool Surface::isRunning() const noexcept { return m_running; }
-
-void Surface::pauseFrameLoop() {
-  cancelQueuedFrameWork();
-  cancelQueuedRender();
-  setRunning(false);
-}
-
-void Surface::resumeFrameLoop() {
-  setRunning(true);
-  if (m_configured) {
-    requestLayout();
-  }
-}
 
 float Surface::effectiveBufferScale() const noexcept {
   if (m_fractionalScale != nullptr && m_viewport != nullptr) {
@@ -579,7 +567,7 @@ std::vector<InputRect> Surface::tessellateRoundedRect(
   for (int row = 0; row < topBand; row += stripPx) {
     const int rowH = std::min(stripPx, topBand - row);
     // Use the strip's bottom edge for the inset sample so the polygon stays inside the curve.
-    const float sample = static_cast<float>(row + rowH);
+    const auto sample = static_cast<float>(row + rowH);
     const float leftInset = inset(tl, sample);
     const float rightInset = inset(tr, sample);
     const int rx = x + static_cast<int>(std::ceil(leftInset));
@@ -599,7 +587,7 @@ std::vector<InputRect> Surface::tessellateRoundedRect(
     const int rowFromTop = row;
     const int rowH = std::min(stripPx, bottomBand - rowFromTop);
     // Sample at the strip's top edge (distance from bottom edge of the rect).
-    const float sample = static_cast<float>(bottomBand - rowFromTop);
+    const auto sample = static_cast<float>(bottomBand - rowFromTop);
     const float leftInset = inset(bl, sample);
     const float rightInset = inset(br, sample);
     const int rx = x + static_cast<int>(std::ceil(leftInset));
@@ -634,8 +622,8 @@ std::vector<InputRect> Surface::tessellateShape(
   const int visualW = w + static_cast<int>(std::lround(insetL)) + static_cast<int>(std::lround(insetR));
   const int visualH = h + static_cast<int>(std::lround(insetT)) + static_cast<int>(std::lround(insetB));
 
-  const float W = static_cast<float>(visualW);
-  const float H = static_cast<float>(visualH);
+  const auto W = static_cast<float>(visualW);
+  const auto H = static_cast<float>(visualH);
   const float bodyMinX = std::clamp(insetL, 0.0f, W);
   const float bodyMaxX = std::clamp(W - insetR, bodyMinX, W);
   const float bodyMinY = std::clamp(insetT, 0.0f, H);
@@ -766,12 +754,12 @@ std::vector<InputRect> Surface::tessellateShape(
         // spike columns the match may not be the very last rect, so scan back over
         // the few rects that end at this row.
         bool merged = false;
-        for (auto it = out.rbegin(); it != out.rend(); ++it) {
-          if (it->y + it->height < ry) {
+        for (auto& rect : std::views::reverse(out)) {
+          if (rect.y + rect.height < ry) {
             break;
           }
-          if (it->x == rx && it->width == rw && it->y + it->height == ry) {
-            it->height += rowH;
+          if (rect.x == rx && rect.width == rw && rect.y + rect.height == ry) {
+            rect.height += rowH;
             merged = true;
             break;
           }
@@ -981,7 +969,7 @@ void Surface::cancelQueuedFrameWork() {
     return;
   }
   auto& queue = pendingFrameWorkQueue();
-  queue.erase(std::remove(queue.begin(), queue.end(), this), queue.end());
+  std::erase(queue, this);
   m_frameWorkQueued = false;
   m_frameTickPending = false;
   m_pendingFrameDeltaMs = 0.0f;
@@ -1013,7 +1001,10 @@ void Surface::processQueuedFrameWork() {
       );
     }
 
-    if (m_frameTickCallback) {
+    // Frame-tick callbacks make the surface's render target current and do GL
+    // work. Skip them until the target is ready; on wlroots compositors the
+    // surface can be configured a frame before its EGL surface exists.
+    if (m_frameTickCallback && ensureRenderTargetReady()) {
       const float callbackMs = elapsedMs([this, deltaMs] { m_frameTickCallback(deltaMs); });
       recordSurfaceProfileEvent(*this, SurfaceProfileEvent::FrameTick, callbackMs);
       logSlowSurfaceOperation(
@@ -1059,7 +1050,7 @@ void Surface::cancelQueuedRender() {
     return;
   }
   auto& queue = pendingRenderQueue();
-  queue.erase(std::remove(queue.begin(), queue.end(), this), queue.end());
+  std::erase(queue, this);
   m_renderQueued = false;
 }
 

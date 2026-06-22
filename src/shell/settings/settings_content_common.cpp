@@ -56,6 +56,9 @@ namespace settings {
     if (key == "margin_edge") {
       return override->marginEdge.has_value();
     }
+    if (key == "margin_opposite_edge") {
+      return override->marginOppositeEdge.has_value();
+    }
     if (key == "padding") {
       return override->padding.has_value();
     }
@@ -127,6 +130,23 @@ namespace settings {
     }
     if (key == "end") {
       return override->endWidgets.has_value();
+    }
+    if (path.size() >= 6 && path[4] == "dead_zone") {
+      if (key == "command") {
+        return override->deadZone.command.has_value();
+      }
+      if (key == "right_command") {
+        return override->deadZone.rightCommand.has_value();
+      }
+      if (key == "middle_command") {
+        return override->deadZone.middleCommand.has_value();
+      }
+      if (key == "scroll_up_command") {
+        return override->deadZone.scrollUpCommand.has_value();
+      }
+      if (key == "scroll_down_command") {
+        return override->deadZone.scrollDownCommand.has_value();
+      }
     }
     return false;
   }
@@ -323,6 +343,9 @@ namespace settings {
     }
     if (filter.playSound) {
       parts.emplace_back(i18n::tr("settings.notifications.filter.flag.sound"));
+    }
+    if (filter.allowPermanent) {
+      parts.emplace_back(i18n::tr("settings.notifications.filter.flag.permanent"));
     }
     if (!filter.allowedUrgencies.empty()) {
       std::vector<std::string> urgencyLabels;

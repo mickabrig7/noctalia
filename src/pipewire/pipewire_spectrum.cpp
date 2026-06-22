@@ -458,7 +458,7 @@ void PipeWireSpectrum::rebuildStream() {
   m_samplesReceived = false;
   m_sensitivity = 0.01f;
   m_sensInit = true;
-  std::fill(m_analysisBands.begin(), m_analysisBands.end(), 0.0f);
+  std::ranges::fill(m_analysisBands, 0.0f);
   for (auto& [id, state] : m_listeners) {
     (void)id;
     resetListenerState(state, false);
@@ -486,11 +486,11 @@ const AudioNode* PipeWireSpectrum::resolvedTargetNode() const noexcept {
   }
 
   const auto& state = m_service.state();
-  auto sink = std::ranges::find_if(state.sinks, [id](const AudioNode& node) { return node.id == id; });
+  auto sink = std::ranges::find(state.sinks, id, &AudioNode::id);
   if (sink != state.sinks.end()) {
     return &*sink;
   }
-  auto source = std::ranges::find_if(state.sources, [id](const AudioNode& node) { return node.id == id; });
+  auto source = std::ranges::find(state.sources, id, &AudioNode::id);
   if (source != state.sources.end()) {
     return &*source;
   }
@@ -508,7 +508,7 @@ void PipeWireSpectrum::clearValues(bool notify) {
       changedListeners.push_back(id);
     }
   }
-  std::fill(m_analysisBands.begin(), m_analysisBands.end(), 0.0f);
+  std::ranges::fill(m_analysisBands, 0.0f);
   m_idleFrames = 0;
   m_idle = true;
   m_samplesReceived = false;
@@ -608,7 +608,7 @@ void PipeWireSpectrum::computeAnalysisBandBins() {
   m_analysisBandBinLow.resize(analysisBandCountSize);
   m_analysisBandBinHigh.resize(analysisBandCountSize);
 
-  const float fLow = static_cast<float>(m_lowerCutoff);
+  const auto fLow = static_cast<float>(m_lowerCutoff);
   const float fHigh = static_cast<float>(std::min(m_upperCutoff, m_sampleRate / 2));
   const float ratio = fHigh / fLow;
   const int fftBins = kFftSize / 2;
@@ -747,16 +747,13 @@ void PipeWireSpectrum::processFrame() {
     bands[i] = std::sqrt(maxMagSq);
   }
 
-  const float invBandCount = 1.0f / static_cast<float>(std::max(1, m_analysisBandCount));
-  for (std::size_t i = 0; i < analysisBandCountSize; ++i) {
-    const float weight = 1.0f + 0.5f * (static_cast<float>(m_analysisBandCount) - static_cast<float>(i)) * invBandCount;
-    bands[i] *= weight;
-  }
-
   const float nrFactor = m_noiseReduction;
   const float noiseGate = nrFactor * static_cast<float>(kFftSize) * 0.00005f;
   for (auto& band : bands) {
     band = std::max(0.0f, band - noiseGate);
+    // Log compression keeps quiet treble visible next to loud bass: a large linear
+    // magnitude ratio collapses to a small additive offset, so one band can't crush the rest.
+    band = std::log1p(band);
     band *= m_sensitivity;
   }
 

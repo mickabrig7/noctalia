@@ -22,6 +22,8 @@ struct RoundedRectStyle;
 struct ScreenCornerStyle;
 struct SpinnerStyle;
 struct TransitionParams;
+struct WallpaperSpanParams;
+struct WallpaperDrawParams;
 
 class RenderFramebuffer {
 public:
@@ -113,9 +115,12 @@ public:
   virtual void initialize(GlSharedContext& shared) = 0;
   virtual void cleanup() = 0;
 
-  virtual void makeCurrent(RenderTarget& target) = 0;
+  // Returns false if the surface could not be made current (e.g. invalidated
+  // during compositor teardown); callers must skip the frame, not treat it as fatal.
+  virtual bool makeCurrent(RenderTarget& target) = 0;
   virtual void makeCurrentNoSurface() = 0;
-  virtual void beginFrame(RenderTarget& target) = 0;
+  // Returns false if the frame could not begin; callers must skip drawing and endFrame.
+  virtual bool beginFrame(RenderTarget& target) = 0;
   virtual void endFrame(RenderTarget& target) = 0;
   [[nodiscard]] virtual RenderGraphicsResetStatus graphicsResetStatus() = 0;
   virtual void invalidateGpuResources() = 0;
@@ -161,13 +166,7 @@ public:
       TextureId dataTexture, int textureWidth, float surfaceWidth, float surfaceHeight, float width, float height,
       const GraphStyle& style, const Mat3& transform
   ) = 0;
-  virtual void drawWallpaper(
-      WallpaperTransition transition, WallpaperSourceKind sourceKind1, TextureId texture1, const Color& sourceColor1,
-      WallpaperSourceKind sourceKind2, TextureId texture2, const Color& sourceColor2, float surfaceWidth,
-      float surfaceHeight, float width, float height, float imageWidth1, float imageHeight1, float imageWidth2,
-      float imageHeight2, float progress, float fillMode, const TransitionParams& params, const Color& fillColor,
-      const Mat3& transform
-  ) = 0;
+  virtual void drawWallpaper(const WallpaperDrawParams& params) = 0;
   virtual void drawFullscreenTexture(TextureId texture, bool flipY) = 0;
   virtual void drawFullscreenTint(Color color) = 0;
   virtual void drawFramebufferBlur(

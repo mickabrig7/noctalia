@@ -172,7 +172,7 @@ void ScreenSaverService::registerLogindIdleMonitor(SystemBus* systemBus) {
           applyLogindBlockInhibited(it->second.get<std::string>());
         });
 
-    const std::string blockInhibited =
+    const auto blockInhibited =
         m_logindProxy->getProperty("BlockInhibited").onInterface(kLogindManagerInterface).get<std::string>();
     applyLogindBlockInhibited(blockInhibited);
     kLog.info("logind idle inhibit monitor active");
@@ -213,8 +213,7 @@ std::uint32_t ScreenSaverService::onInhibit(std::string app, std::string reason,
 }
 
 void ScreenSaverService::onUninhibit(std::uint32_t cookie, const char* sender) {
-  const auto it =
-      std::ranges::find_if(m_cookies, [cookie](const InhibitCookie& entry) { return entry.cookie == cookie; });
+  const auto it = std::ranges::find(m_cookies, cookie, &InhibitCookie::cookie);
   if (it == m_cookies.end()) {
     kLog.warn("screensaver uninhibit: unknown cookie {} from {}", cookie, sender != nullptr ? sender : "?");
     return;
